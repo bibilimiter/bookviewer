@@ -564,7 +564,9 @@ async function show(s, keepZoom) {
   const tok = ++R.token;
   R.pos = s; R.view = viewAt(s);
   updateBars();
-  saveJson('bv_pos_' + R.item.id, { p: s, n: R.src.count, t: Date.now() });
+  // 検索で飛んでいる間は、読んでいた位置を上書きしない（「元のページへ」で戻れるように）
+  if (R.back == null) saveJson('bv_pos_' + R.item.id, { p: s, n: R.src.count, t: Date.now() });
+  updateChip();
   const spin = setTimeout(() => { if (tok === R.token) $('loading').hidden = false; }, 250);
   try {
     const pgs = await Promise.all(R.view.map(getPage));
@@ -653,7 +655,7 @@ function toast(msg, ms) {
 }
 
 async function openBook(item, noPush) {
-  R.open = true; R.item = item;
+  R.open = true; R.item = item; R.back = null;
   R.opt = Object.assign({ dir: 'rtl', spread: 'auto', shift: item.kind === 'zip' }, loadJson('bv_view_' + item.id, {}));
   $('library').hidden = true; reader.hidden = false; setUi(true);
   $('title').textContent = item.parent ? item.parent.title + '／' + item.title : item.title;
@@ -682,8 +684,8 @@ async function openBook(item, noPush) {
 }
 function closeReader() {
   if (!R.open) return;
-  R.open = false;
-  closeSearch();
+  R.open = false; R.back = null;
+  closeSearch(); updateChip();
   releaseBook();
   pagesEl.replaceChildren();
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
@@ -806,7 +808,10 @@ async function runSearch() {
     const mk = document.createElement('mark'); mk.textContent = h.word;
     tx.append('…' + h.before, mk, h.after + '…');
     li.append(pn, tx);
-    li.onclick = () => { setQuery(q); closeSearch(); setUi(false); show(h.p); };
+    li.onclick = () => {
+      if (R.back == null) R.back = R.pos;  // 飛ぶ前に読んでいたページを覚えておく
+      setQuery(q); closeSearch(); setUi(false); show(h.p);
+    };
     list.append(li);
   }
   setQuery(q);
@@ -817,12 +822,37 @@ function setQuery(q) {
   R.src.query = q;
   for (const p of R.cache.values()) p.then((pg) => { pg.scale = 0; }).catch(() => { });
   $('searchBtn').classList.toggle('on', !!q);
+  updateChip();
   Promise.resolve().then(() => show(R.pos, true));
 }
 $('searchBtn').onclick = openSearch;
 $('searchClose').onclick = closeSearch;
 $('searchGo').onclick = runSearch;
-$('searchClear').onclick = () => { $('searchInput').value = ''; SR.tok++; $('searchList').innerHTML = ''; $('searchStatus').textContent = ''; setQuery(''); };
+// 検索をやめる。goBack なら、検索で飛ぶ前に読んでいたページへもどる。そうでなければ、いまのページから読む
+function endSearch(goBack) {
+  $('searchInput').value = ''; SR.tok++; $('searchList').innerHTML = ''; $('searchStatus').textContent = '';
+  const back = R.back; R.back = null;
+  setQuery('');
+  if (goBack && back != null && back !== R.pos) show(back, false);
+  else if (R.src) show(R.pos, true);  // いまのページを、読んでいる位置としてしまう
+  closeSearch(); updateChip();
+}
+// 画面の下の小さな札：検索中であることと、もどるボタン
+function updateChip() {
+  const chip = $('searchChip');
+  const q = R.src && R.src.query, back = R.back;
+  chip.hidden = !R.open || (!q && back == null);
+  if (chip.hidden) return;
+  $('chipText').textContent = '🔍「' + ($('searchInput').value.trim() || q || '') + '」';
+  $('chipBack').hidden = back == null;
+  $('chipBack').textContent = '↩ 元のページ（' + ((back || 0) + 1) + '）へ';
+  $('chipHere').hidden = back == null;
+  $('chipClear').hidden = back != null;
+}
+$('searchClear').onclick = () => endSearch(true);
+$('chipBack').onclick = () => endSearch(true);
+$('chipHere').onclick = () => endSearch(false);
+$('chipClear').onclick = () => endSearch(false);
 $('searchInput').addEventListener('keydown', (e) => {
   e.stopPropagation();
   if (e.key === 'Enter') { e.preventDefault(); runSearch(); }
