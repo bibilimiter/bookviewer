@@ -394,6 +394,10 @@ function renderCards(box, items) {
       };
       p.append(del);
     }
+    // まとめの中で、いま読んでいる巻に目印を付ける
+    const cur = it.parent && (loadJson('bv_pos_' + it.parent.id, {}) || {}).vol === it.entry;
+    let mark = null;
+    if (cur) { el.classList.add('current'); mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = '▶ 読んでいる'; cv.append(mark); }
     el.append(cv, ti, p);
     el.onclick = () => openItem(it);
     box.append(el);
@@ -401,7 +405,7 @@ function renderCards(box, items) {
       if (!c || !c.blob) return;
       const u = URL.createObjectURL(c.blob); libUrls.push(u);
       const img = document.createElement('img'); img.alt = ''; img.src = u;
-      cv.textContent = ''; cv.append(img, tag, bar); setProg(c);
+      cv.textContent = ''; cv.append(img, tag, bar); if (mark) cv.append(mark); setProg(c);
     };
     dbGet('covers', it.id).then((c) => {
       showCover(c);
@@ -437,6 +441,8 @@ function renderSet() {
   $('setTitle').textContent = SET.item.title + '（全' + SET.vols.length + '巻）';
   const box = $('vols'); box.innerHTML = '';
   renderCards(box, SET.vols);
+  const cur = box.querySelector('.book.current');
+  if (cur) cur.scrollIntoView({ block: 'center' });
 }
 function closeSet() {
   SET.open = false;

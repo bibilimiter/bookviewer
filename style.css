@@ -65,3 +65,6 @@ body { -webkit-text-size-adjust: 100%; }
 .pageno { min-width: 90px; text-align: right; font-variant-numeric: tabular-nums; color: #ddd; font-size: 14px; }
 .btn.on { background: var(--accent); border-color: var(--accent); }
 .settitle { font-size: 17px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.book.current .cv { border: 3px solid #f59e0b; }
+.book.current .t { color: #fbbf24; font-weight: bold; }
+.book .mark { position: absolute; right: 4px; top: 4px; background: #f59e0b; color: #111; font-size: 11px; font-weight: bold; padding: 1px 6px; border-radius: 4px; }
