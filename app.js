@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v9';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v10';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -784,7 +784,37 @@ function closeSearch() {
   // キーボードを閉じ、ずれた画面を元にもどして、ページを今の画面の大きさで描きなおす
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   window.scrollTo(0, 0);
-  if (R.open && R.src) setTimeout(() => { window.scrollTo(0, 0); if (R.open && R.src) show(R.pos, false); }, 350);
+  if (R.open && R.src) setTimeout(() => { window.scrollTo(0, 0); fixViewportZoom(); if (R.open && R.src) show(R.pos, false); }, 400);
+}
+// Android（Brave など）で、キーボードを出したあとにブラウザの拡大が残ってしまうことがあるので、元の大きさにもどす
+// 1. 画面の設定（viewport）を書きなおす  2. だめなら、全画面にしてすぐもどす（これで直ることを実機で確認ずみ）
+function fixViewportZoom() {
+  const vv = window.visualViewport;
+  if (!vv || vv.scale <= 1.01) return;
+  const m = document.querySelector('meta[name=viewport]'), orig = m.content;
+  m.content = 'width=device-width, initial-scale=1.001, minimum-scale=1, maximum-scale=1.001, viewport-fit=cover';
+  setTimeout(() => {
+    m.content = orig;
+    setTimeout(() => {
+      if (vv.scale <= 1.01 || !document.documentElement.requestFullscreen) return;
+      const was = !!document.fullscreenElement;
+      const toggle = was ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+      Promise.resolve(toggle).then(() => setTimeout(() => {
+        (was ? document.documentElement.requestFullscreen() : document.exitFullscreen()).catch(() => { });
+      }, 200)).catch(() => { });
+    }, 150);
+  }, 150);
+}
+// ほかの時（キーボードを閉じたあとなど）にも、拡大が残っていたら直す
+if (window.visualViewport) {
+  let vvTimer = 0;
+  window.visualViewport.addEventListener('resize', () => {
+    clearTimeout(vvTimer);
+    vvTimer = setTimeout(() => {
+      const ae = document.activeElement;
+      if (R.open && !(ae && ae.tagName === 'INPUT' && ae.type !== 'range')) fixViewportZoom();
+    }, 500);
+  });
 }
 // 本の全ページの文字を用意する（一度取り出したら端末にしまっておき、次からはすぐ使う）
 async function bookTexts(tok) {
