@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BookViewer</title>
+<meta name="theme-color" content="#1f2937">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BookViewer">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<!-- PDF のページを絵にする部品（pdf.js）。一度読みこむと、サービスワーカーがしまっておくので、次からはネットなしで動く -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+
+<!-- 本棚 -->
+<section id="library" class="view">
+  <header class="bar">
+    <h1>BookViewer</h1>
+    <span class="grow"></span>
+    <button id="pickDir" class="btn" hidden>📁 フォルダを選ぶ</button>
+    <label class="btn primary" for="fileInput">＋ 本を取りこむ</label>
+    <input id="fileInput" type="file" accept=".zip,.cbz,.pdf,application/zip,application/pdf" multiple hidden>
+  </header>
+  <div id="dirBar" class="notice" hidden>
+    <span id="dirText"></span>
+    <button id="dirAllow" class="btn primary" hidden>読みこむ</button>
+  </div>
+  <p id="libHint" class="hint" hidden></p>
+  <div id="books" class="books"></div>
+  <p id="storage" class="small"></p>
+</section>
+
+<!-- 読む画面 -->
+<section id="reader" class="view" hidden>
+  <div id="stage">
+    <div id="pages"></div>
+  </div>
+  <div id="loading" class="loading" hidden>読みこんでいます…</div>
+  <header id="topBar" class="bar overlay top">
+    <button id="back" class="btn">‹ 本棚</button>
+    <span id="title" class="title"></span>
+    <button id="dirBtn" class="btn" title="右開き／左開き"></button>
+    <button id="spreadBtn" class="btn" title="見開き"></button>
+    <button id="shiftBtn" class="btn" title="見開きの組み合わせを1ページずらす">ずらす</button>
+    <button id="fullBtn" class="btn" title="画面いっぱい" hidden>⛶</button>
+  </header>
+  <footer id="bottomBar" class="bar overlay bottom">
+    <input id="slider" type="range" min="1" max="1" value="1">
+    <span id="pageNo" class="pageno"></span>
+  </footer>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
