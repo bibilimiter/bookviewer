@@ -100,3 +100,48 @@ body { -webkit-text-size-adjust: 100%; }
 .mrow { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); }
 .mrow .hit { flex: 1; border-bottom: 0; min-width: 0; }
 .hit.here { background: #1e3a5f; }
+
+/* 聞く画面（BookPlayer の本） */
+#listen { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
+#listen[hidden] { display: none; }
+.lbar { background: var(--panel); border-bottom: 1px solid var(--line); padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: 8px; }
+.ltitles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ltitle { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#lsTrack { max-width: 100%; font-size: 14px; background: #374151; color: var(--text); border: 0; border-radius: 6px; padding: 3px 6px; }
+#lsStage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+#lsPages { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; direction: rtl; }
+.lpage { position: relative; direction: ltr; background: #fff; }
+.lpage canvas { position: absolute; left: 0; top: 0; }
+.lnav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 88px; border: 0; border-radius: 10px;
+  background: rgba(31,41,55,.35); color: #fff; font-size: 28px; opacity: .55; cursor: pointer; }
+.lnav.left { left: 6px; } .lnav.right { right: 6px; }
+#lsPageInfo { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); background: rgba(31,41,55,.75); color: #fff;
+  font-size: 13px; padding: 3px 10px; border-radius: 10px; pointer-events: none; white-space: nowrap; }
+#lsPageInfo:empty { display: none; }
+#lsLoading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 16px; }
+#lsLoading[hidden] { display: none; }
+#lsFullCtrl { display: none; position: absolute; right: max(8px, env(safe-area-inset-right)); top: max(8px, env(safe-area-inset-top));
+  gap: 6px; opacity: .45; z-index: 5; }
+#lsFullCtrl:hover, #lsFullCtrl:active { opacity: .9; }
+#lsFullCtrl .btn { background: rgba(31,41,55,.85); border: 0; padding: 10px 12px; font-size: 16px; }
+.lsfull #listen > .lbar, .lsfull #lsPanel { display: none; }
+.lsfull #lsFullCtrl { display: flex; }
+.lsfull #lsStage { background: #000; }
+#lsPanel { background: var(--panel); border-top: 1px solid var(--line);
+  padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+#lsLine { font-size: 15px; line-height: 1.5; min-height: 3em; max-height: 4.5em; overflow: hidden; }
+#listen .seekrow { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
+#lsSeek { flex: 1; accent-color: var(--accent); }
+#lsTime { font-size: 13px; color: var(--sub); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#listen .ctrl { display: flex; justify-content: center; gap: 8px; }
+#listen .ctrl .btn { min-width: 56px; padding: 12px 10px; font-size: 16px; }
+#listen .ctrl .play { min-width: 84px; font-size: 20px; }
+#lsMenu { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 40; }
+#lsMenu[hidden] { display: none; }
+#lsMenu .menubox { background: var(--panel); color: var(--text); border-radius: 14px; padding: 16px 18px; width: min(92vw, 420px);
+  display: flex; flex-direction: column; gap: 12px; }
+#lsMenu h2 { margin: 0 0 4px; font-size: 18px; }
+#lsMenu label { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+#lsMenu select { flex: 1; font-size: 15px; padding: 6px; background: #111827; color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+#lsMenu input[type=range] { flex: 1; }
+#lsMenu .small { margin: -6px 0 0; }

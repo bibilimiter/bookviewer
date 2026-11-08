@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v13';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v14';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -314,10 +314,20 @@ async function makeThumb({ img, url }) {
 async function makeCover(blob, kind) {
   if (kind === 'zip') {
     const zip = await openZip(blob);
+    // BookPlayer の本（音声つき）：中の表紙を使う
+    const m = window.LISTEN ? await LISTEN.bookManifest(zip) : null;
+    if (m) {
+      const titles = m.tracks.map((t, i) => t.title || ('曲 ' + (i + 1)));
+      const ce = m.cover && zip.entries.find((e) => e.name === m.cover);
+      let cb = null;
+      if (ce) { try { cb = await makeThumb(await loadImage(await zip.blob(ce, mimeOf(ce.name) || 'image/jpeg'))); } catch (e) { } }
+      if (!cb) { const ps = await pdfSource(await zip.blob(zip.entries.find((e) => e.name === m.pdf), 'application/pdf')); try { cb = await ps.thumb(); } finally { ps.close(); } }
+      return { blob: cb, n: titles.length, listen: true, tracks: titles, title: m.title || '' };
+    }
     const vols = zipVolumes(zip);
     if (vols) {  // 何巻かのまとめ：1巻目の表紙を使う
       const c = await makeCover(await zip.blob(vols[0], ''), kindOf(vols[0].name));
-      if (vols.length === 1) return { blob: c.blob, n: c.n, single: kindOf(vols[0].name) };  // 中の本が1冊だけ
+      if (vols.length === 1) return { blob: c.blob, n: c.n, single: kindOf(vols[0].name), listen: false };  // 中の本が1冊だけ
       return { blob: c.blob, n: vols.length, set: true };
     }
   }
@@ -452,6 +462,13 @@ function renderCards(box, items) {
         fill.style.width = '0';
         return;
       }
+      if (c && c.listen) {  // BookPlayer の本（聞きながら読む）
+        tag.textContent = '🎧 聞く';
+        if (c.title) ti.textContent = c.title;
+        pt.textContent = window.LISTEN ? LISTEN.progress(it, c.tracks) : '';
+        fill.style.width = '0';
+        return;
+      }
       if (c && c.single) tag.textContent = c.single === 'pdf' ? 'PDF' : '漫画';
       const g = progressOf(it, c ? c.n : 0); pt.textContent = g.text; fill.style.width = Math.round(g.ratio * 100) + '%';
     };
@@ -466,7 +483,7 @@ function renderCards(box, items) {
         try { for (const k of await dbKeys('covers')) if (String(k).startsWith(it.id + '#')) await dbDel('covers', k); } catch (e) { }
         try {
           for (const k of Object.keys(localStorage)) {
-            if (k === 'bv_pos_' + it.id || k === 'bv_view_' + it.id || k.startsWith('bv_pos_' + it.id + '#') || k.startsWith('bv_view_' + it.id + '#')) removeKey(k);
+            if (k === 'bv_pos_' + it.id || k === 'bv_listen_' + it.id || k === 'bv_view_' + it.id || k.startsWith('bv_pos_' + it.id + '#') || k.startsWith('bv_view_' + it.id + '#')) removeKey(k);
           }
         } catch (e) { }
         showLibrary();
@@ -490,7 +507,8 @@ function renderCards(box, items) {
       showCover(c);
       // フォルダの本は、ファイルが変わっていたら表紙を作りなおす。表紙のない本は作る
       // 前の版で作った表紙で、中の本をまだ見分けていないもの（画像が数枚だけの ZIP）は作りなおす
-      const force = !!(c && it.kind === 'zip' && !it.parent && !c.set && !c.single && c.n <= 3);
+      // v14 より前に作った表紙で、中の本が1冊だけのもの（BookPlayer の本かもしれない）も作りなおす
+      const force = !!(c && it.kind === 'zip' && !it.parent && ((!c.set && !c.single && !c.listen && c.n <= 3) || (c.single && c.listen === undefined)));
       if (!c || it.src === 'dir' || force) { coverQueue.push({ it, cached: force ? null : c, showCover }); runCoverQueue(); }
     }).catch(() => { });
   }
@@ -501,8 +519,12 @@ const SET = { item: null, vols: [], open: false };
 // 本を押したとき：まとめなら巻の一覧を、ふつうの本なら読む画面を出す
 async function openItem(it) {
   if (it.kind === 'zip' && !it.parent) {
-    let vols = null;
-    try { vols = zipVolumes(await openZip(await getBookFile(it))); } catch (e) { }
+    let vols = null, zip = null;
+    try { zip = await openZip(await getBookFile(it)); } catch (e) { }
+    // BookPlayer の本は、音声に合わせて文字を追う「聞く」画面で開く
+    const m = zip && window.LISTEN ? await LISTEN.bookManifest(zip) : null;
+    if (m) { LISTEN.open(it, zip, m); return; }
+    try { if (zip) vols = zipVolumes(zip); } catch (e) { }
     if (vols && vols.length === 1) { openBook(singleInner(it, vols[0])); return; }
     if (vols) { showSet(it, vols); return; }
   }
@@ -898,7 +920,11 @@ function closeReader() {
   else { $('library').hidden = false; showLibrary(); }
 }
 window.addEventListener('popstate', () => {
-  if (R.open) closeReader();
+  if (window.LISTEN && LISTEN.isOpen()) {
+    LISTEN.close();
+    if (pendingReload) { location.reload(); return; }
+    $('library').hidden = false; showLibrary();
+  } else if (R.open) closeReader();
   else if (SET.open) closeSet();
 });
 $('back').onclick = () => history.back();
@@ -1311,6 +1337,7 @@ if ('serviceWorker' in navigator) {
     if (!hadController || pendingReload) return;
     pendingReload = true;
     if (R.open) toast('新しい版が届きました。本棚にもどると入れかわります', 3000);
+    else if (window.LISTEN && LISTEN.isOpen()) { }  // 聞いている最中は、本棚にもどったときに入れかえる
     else location.reload();
   });
 }
