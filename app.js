@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v7';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v8';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -15,7 +15,7 @@ const THUMB_W = 280;              // 本棚の表紙の幅（画素）
 const MAX_CANVAS_PIXELS = 8e6;    // PDF の1ページを絵にするときの画素数の上限（iPad で落ちないように）
 const KEEP_BEFORE = 3, KEEP_AFTER = 5;  // 今のページの前後、何ページ分を取り出したまま持っておくか（ほかは手放す）
 const kindOf = (name) => (/\.pdf$/i.test(name) ? 'pdf' : 'zip');
-const baseName = (name) => name.replace(/^.*\//, '').replace(/\.(zip|cbz|pdf)$/i, '');
+const baseName = (name) => name.replace(/^.*\//, '').replace(/(\.book)?\.(zip|cbz|pdf)$/i, '');  // 「〜.book.zip」（BookPlayer の本）は「〜」に
 const errText = (e) => (e && e.message ? e.message : String(e));
 
 // ---------------- しまっておく所（IndexedDB と localStorage） ----------------
@@ -148,9 +148,10 @@ const hiddenName = (name) => /(^|\/)(__MACOSX\/|\.)/.test(name);
 const byName = (a, b) => collator.compare(a.name, b.name);
 // ZIP の中の画像（ページ）を、名前の順に
 const zipPages = (zip) => zip.entries.filter((e) => IMG_RE.test(e.name) && !hiddenName(e.name)).sort(byName);
-// ZIP の中に入っている巻ごとの ZIP・PDF（画像が1枚もないときだけ「何巻かのまとめ」とみなす）
+// ZIP の中に入っている巻ごとの ZIP・PDF。画像がない（または表紙など3枚まで）ときだけ、中の本を読む
+// 中の本が1冊だけ（BookPlayer の「〜.book.zip」など）なら、その本をそのまま開く
 function zipVolumes(zip) {
-  if (zipPages(zip).length) return null;
+  if (zipPages(zip).length > 3) return null;
   const v = zip.entries.filter((e) => BOOK_RE.test(e.name) && !hiddenName(e.name)).sort(byName);
   return v.length ? v : null;
 }
@@ -260,6 +261,7 @@ async function makeCover(blob, kind) {
     const vols = zipVolumes(zip);
     if (vols) {  // 何巻かのまとめ：1巻目の表紙を使う
       const c = await makeCover(await zip.blob(vols[0], ''), kindOf(vols[0].name));
+      if (vols.length === 1) return { blob: c.blob, n: c.n, single: kindOf(vols[0].name) };  // 中の本が1冊だけ
       return { blob: c.blob, n: vols.length, set: true };
     }
   }
@@ -340,7 +342,7 @@ async function getBookFile(item) {
 }
 function progressOf(item, n) {
   const pos = loadJson('bv_pos_' + item.id, null);
-  const total = (pos && pos.n) || n || 0;
+  const total = n || (pos && pos.n) || 0;  // ページ数は表紙といっしょに数えたものを優先
   if (!pos || pos.p == null) return { text: total ? total + ' ページ・未読' : '未読', ratio: 0 };
   if (total && pos.p >= total - 2) return { text: '読み終わり', ratio: 1 };
   return { text: (pos.p + 1) + ' / ' + (total || '?') + ' ページ', ratio: total ? (pos.p + 1) / total : 0 };
@@ -351,6 +353,7 @@ async function showLibrary() {
   coverQueue = [];
   let local = [];
   try { local = await dbAll('books'); } catch (e) { }
+  local.forEach((b) => { b.title = b.title.replace(/\.book$/i, ''); });
   const items = [...DIR.items, ...local];
   const t = (it) => (loadJson('bv_pos_' + it.id, {}).t || 0);
   items.sort((a, b) => (t(b) - t(a)) || collator.compare((a.folder || '') + a.title, (b.folder || '') + b.title));
@@ -392,6 +395,7 @@ function renderCards(box, items) {
         fill.style.width = '0';
         return;
       }
+      if (c && c.single) tag.textContent = c.single === 'pdf' ? 'PDF' : '漫画';
       const g = progressOf(it, c ? c.n : 0); pt.textContent = g.text; fill.style.width = Math.round(g.ratio * 100) + '%';
     };
     setProg(null);
@@ -428,7 +432,9 @@ function renderCards(box, items) {
     dbGet('covers', it.id).then((c) => {
       showCover(c);
       // フォルダの本は、ファイルが変わっていたら表紙を作りなおす。表紙のない本は作る
-      if (!c || it.src === 'dir') { coverQueue.push({ it, cached: c, showCover }); runCoverQueue(); }
+      // 前の版で作った表紙で、中の本をまだ見分けていないもの（画像が数枚だけの ZIP）は作りなおす
+      const force = !!(c && it.kind === 'zip' && !it.parent && !c.set && !c.single && c.n <= 3);
+      if (!c || it.src === 'dir' || force) { coverQueue.push({ it, cached: force ? null : c, showCover }); runCoverQueue(); }
     }).catch(() => { });
   }
 }
@@ -440,9 +446,14 @@ async function openItem(it) {
   if (it.kind === 'zip' && !it.parent) {
     let vols = null;
     try { vols = zipVolumes(await openZip(await getBookFile(it))); } catch (e) { }
+    if (vols && vols.length === 1) { openBook(singleInner(it, vols[0])); return; }
     if (vols) { showSet(it, vols); return; }
   }
   openBook(it);
+}
+// ZIP の中の1冊を、外の ZIP と同じ本として開く（読んだ位置なども外の ZIP の名前で覚える）
+function singleInner(it, e) {
+  return { id: it.id, title: it.title, entry: e.name, kind: kindOf(e.name), parent: it, single: true, src: it.src, handle: it.handle };
 }
 function showSet(it, vols) {
   SET.item = it; SET.open = true;
@@ -660,13 +671,13 @@ async function openBook(item, noPush) {
   R.open = true; R.item = item; R.back = null;
   R.opt = Object.assign({ dir: 'rtl', spread: 'auto', shift: item.kind === 'zip' }, loadJson('bv_view_' + item.id, {}));
   $('library').hidden = true; reader.hidden = false; setUi(true);
-  $('title').textContent = item.parent ? item.parent.title + '／' + item.title : item.title;
+  $('title').textContent = item.parent && !item.single ? item.parent.title + '／' + item.title : item.title;
   $('searchBtn').hidden = item.kind !== 'pdf'; $('searchBtn').classList.remove('on');
   closeSearch(); $('searchInput').value = ''; $('searchList').innerHTML = ''; $('searchStatus').textContent = '';
   pagesEl.replaceChildren();
   $('loading').textContent = '読みこんでいます…'; $('loading').hidden = false;
   if (!noPush) history.pushState({ reader: 1 }, '');
-  if (item.parent) saveJson('bv_pos_' + item.parent.id, { vol: item.entry, t: Date.now() });  // まとめの中で、どの巻を読んでいるか
+  if (item.parent && !item.single) saveJson('bv_pos_' + item.parent.id, { vol: item.entry, t: Date.now() });  // まとめの中で、どの巻を読んでいるか
   $('setView').hidden = true;
   const tok = ++R.token;
   try {
