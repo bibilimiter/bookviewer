@@ -59,6 +59,8 @@
     <button id="back" class="btn">‹ 本棚</button>
     <span id="title" class="title"></span>
     <button id="searchBtn" class="btn" title="文字で探す（PDF）" hidden>🔍</button>
+    <button id="markBtn" class="btn" title="しおり（B キー）">🔖</button>
+    <button id="cropBtn" class="btn" title="ページのまわりの余白を切って、大きく出す">余白</button>
     <button id="dirBtn" class="btn" title="右開き／左開き"></button>
     <button id="spreadBtn" class="btn" title="見開き"></button>
     <button id="shiftBtn" class="btn" title="見開きの組み合わせを1ページずらす">ずらす</button>
@@ -78,6 +80,18 @@
     </div>
     <div class="srow small2"><span id="searchStatus" class="sstat"></span><button id="searchClear" class="btn tiny">検索をやめる</button></div>
     <div id="searchList" class="slist"></div>
+  </aside>
+  <aside id="markPanel" class="search" hidden>
+    <div class="srow">
+      <strong class="grow">🔖 しおり</strong>
+      <button id="markClose" class="btn" title="閉じる">✕</button>
+    </div>
+    <div class="srow">
+      <input id="markMemo" type="text" placeholder="ひとこと（なくてもよい）" enterkeyhint="done" autocomplete="off">
+    </div>
+    <button id="markAdd" class="btn primary"></button>
+    <div class="srow small2"><span id="markStatus" class="sstat"></span></div>
+    <div id="markList" class="slist"></div>
   </aside>
   <footer id="bottomBar" class="bar overlay bottom">
     <input id="slider" type="range" min="1" max="1" value="1">

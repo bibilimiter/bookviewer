@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v12';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v13';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -126,7 +126,52 @@ async function openZip(blob) {
       }
       throw new Error('この ZIP の縮め方には対応していません（' + e.method + '）');
     },
+    // ファイルの頭の n バイトだけを取り出す（画像のたて・よこを知るため。全部はほどかない）
+    async head(e, n) {
+      if (e.flags & 1) return null;
+      const lh = await readBytes(blob, e.lho, e.lho + 30);
+      const lv = new DataView(lh.buffer);
+      if (lv.getUint32(0, true) !== 0x04034b50) return null;
+      const start = e.lho + 30 + lv.getUint16(26, true) + lv.getUint16(28, true);
+      if (e.method === 0) return readBytes(blob, start, start + Math.min(n, e.csize));
+      if (e.method !== 8 || typeof DecompressionStream === 'undefined') return null;
+      const rd = blob.slice(start, start + e.csize).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+      const parts = []; let got = 0;
+      try {
+        while (got < n) { const r = await rd.read(); if (r.done) break; parts.push(r.value); got += r.value.length; }
+      } catch (err) { if (!got) return null; }
+      rd.cancel().catch(() => { });
+      const out = new Uint8Array(got); let o = 0;
+      for (const a of parts) { out.set(a, o); o += a.length; }
+      return out;
+    },
   };
+}
+// 画像の頭の部分から、たて・よこの大きさを読む（JPEG・PNG・GIF・WebP）
+function imageSize(b) {
+  if (!b || b.length < 24) return null;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  if (b[0] === 0x89 && b[1] === 0x50) return { w: dv.getUint32(16), h: dv.getUint32(20) };
+  if (b[0] === 0x47 && b[1] === 0x49) return { w: dv.getUint16(6, true), h: dv.getUint16(8, true) };
+  if (b[0] === 0x52 && b[8] === 0x57 && b.length >= 30) {  // WebP
+    const t = String.fromCharCode(b[12], b[13], b[14], b[15]);
+    if (t === 'VP8 ') return { w: dv.getUint16(26, true) & 0x3fff, h: dv.getUint16(28, true) & 0x3fff };
+    if (t === 'VP8L') { const v = dv.getUint32(21, true); return { w: (v & 0x3fff) + 1, h: ((v >> 14) & 0x3fff) + 1 }; }
+    if (t === 'VP8X') return { w: 1 + (b[24] | b[25] << 8 | b[26] << 16), h: 1 + (b[27] | b[28] << 8 | b[29] << 16) };
+    return null;
+  }
+  if (b[0] === 0xFF && b[1] === 0xD8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xFF) { i++; continue; }
+      const m = b[i + 1];
+      if (m === 0xFF) { i++; continue; }
+      if (m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)) { i += 2; continue; }
+      if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) return { h: dv.getUint16(i + 5), w: dv.getUint16(i + 7) };
+      i += 2 + dv.getUint16(i + 2);
+    }
+  }
+  return null;
 }
 const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', avif: 'image/avif' };
 const mimeOf = (name) => MIME[(name.split('.').pop() || '').toLowerCase()] || '';
@@ -169,6 +214,17 @@ async function zipSource(blob) {
     },
     async place() { },
     close() { },
+    // 全ページのたて・よこ（横長のページを見つけるため）。わからないページは null
+    async sizes(alive) {
+      const out = [];
+      for (const e of pages) {
+        if (!alive()) return null;
+        let sz = null;
+        try { sz = imageSize(await zip.head(e, 65536)); } catch (err) { }
+        out.push(sz);
+      }
+      return out;
+    },
     async thumb() { return makeThumb((await loadImage(await zip.blob(pages[0], mimeOf(pages[0].name))))); },
   };
 }
@@ -534,8 +590,123 @@ $('fileInput').addEventListener('change', async (ev) => {
 });
 
 // ---------------- 読む画面 ----------------
-const R = { item: null, src: null, cache: new Map(), pos: 0, view: [], opt: null, token: 0, z: 1, tx: 0, ty: 0, open: false };
+const R = { item: null, src: null, cache: new Map(), wide: new Set(), crops: new Map(), pos: 0, view: [], opt: null, token: 0, z: 1, tx: 0, ty: 0, open: false };
 const stage = $('stage'), pagesEl = $('pages'), reader = $('reader');
+
+// ---- 横長のページ（見開きの絵）は、見開きでも1枚だけで出す ----
+function wideStarts() {
+  const n = R.src.count, key = (R.opt.shift ? 1 : 0) + ':' + n;
+  if (R.gs && R.gs.key === key) return R.gs.arr;
+  const w = R.wide, arr = new Array(n);
+  let i = 0;
+  if (R.opt.shift && n) { arr[0] = 0; i = 1; }
+  while (i < n) {
+    if (w.has(i) || i + 1 >= n || w.has(i + 1)) { arr[i] = i; i++; }
+    else { arr[i] = arr[i + 1] = i; i += 2; }
+  }
+  R.gs = { key, arr };
+  return arr;
+}
+async function findWide(src) {
+  if (!src.sizes) return;
+  const sizes = await src.sizes(() => R.src === src);
+  if (!sizes || R.src !== src) return;
+  const wide = new Set();
+  sizes.forEach((z, i) => { if (z && z.w > z.h * 1.05) wide.add(i); });
+  R.wide = wide; R.gs = null;
+  if (wide.size && isSpread()) show(R.pos, true);
+}
+
+// ---- 余白を切る ----
+// 小さく描いて、字や絵のある範囲（左・上・右・下を 0〜1 の割合で）を調べる。暗い地のページは null、白紙は {blank}
+async function measureCrop(pg) {
+  const W = 200, sc = W / pg.w, H = Math.max(1, Math.round(pg.h * sc));
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  try {
+    if (pg.page) await pg.page.render({ canvasContext: ctx, viewport: pg.page.getViewport({ scale: sc }) }).promise;
+    else ctx.drawImage(pg.el, 0, 0, W, H);
+  } catch (e) { c.width = c.height = 0; return null; }
+  const d = ctx.getImageData(0, 0, W, H).data; c.width = c.height = 0;
+  const L = new Uint8Array(W * H), hist = new Uint32Array(256);
+  for (let k = 0, j = 0; k < L.length; k++, j += 4) { const v = (d[j] * 3 + d[j + 1] * 6 + d[j + 2]) / 10 | 0; L[k] = v; hist[v]++; }
+  let acc = 0, bg = 255;
+  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= L.length * 0.85) { bg = v; break; } }
+  if (bg < 120) return null;
+  const thr = Math.min(170, bg - 50), ex = Math.max(1, Math.round(W * 0.01)), ey = Math.max(1, Math.round(H * 0.01));
+  const rows = new Uint16Array(H), cols = new Uint16Array(W);
+  for (let y = ey; y < H - ey; y++) for (let x = ex; x < W - ex; x++) if (L[y * W + x] < thr) { rows[y]++; cols[x]++; }
+  const first = (a) => a.findIndex((v) => v >= 2), last = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] >= 2) return i; return -1; };
+  const y0 = first(rows), y1 = last(rows), x0 = first(cols), x1 = last(cols);
+  if (y0 < 0 || x0 < 0) return { blank: true };
+  const pad = 0.015;
+  return [Math.max(0, x0 / W - pad), Math.max(0, y0 / H - pad), Math.min(1, (x1 + 1) / W + pad), Math.min(1, (y1 + 1) / H + pad)];
+}
+const cropOn = () => R.opt.crop && Array.isArray(R.cropBase);
+function ensureCrop(i, pg) {
+  if (!R.crops.has(i)) R.crops.set(i, measureCrop(pg));
+  return R.crops.get(i);
+}
+// 本全体の余白：いくつかのページを調べて、その真ん中の値を使う（ページごとに大きさが変わらないように）
+async function findCropBase() {
+  if (R.cropBase !== undefined || R.cropBusy) return;
+  const src = R.src, id = R.item.id, stamp = R.stamp;
+  const saved = loadJson('bv_crop_' + id, null);
+  if (saved && saved.stamp === stamp) { R.cropBase = saved.b; return; }
+  R.cropBusy = true;
+  try {
+    const n = src.count, idx = [];
+    if (n <= 12) for (let i = 0; i < n; i++) idx.push(i);
+    else for (let k = 0; k < 9; k++) idx.push(Math.round(n * (0.1 + 0.8 * k / 8)));
+    const got = [];
+    for (const i of idx) {
+      if (R.src !== src) return;
+      let pg = null;
+      try {
+        pg = await src.load(i);
+        const c = await measureCrop(pg);
+        if (Array.isArray(c)) got.push(c);
+        if (!R.crops.has(i)) R.crops.set(i, Promise.resolve(c));
+      } catch (e) { } finally { if (pg) pg.free(); }
+    }
+    if (R.src !== src) return;
+    let b = null;
+    if (got.length) {
+      const med = (k) => { const a = got.map((c) => c[k]).sort((x, y) => x - y); return a[a.length >> 1]; };
+      b = [med(0), med(1), med(2), med(3)];
+      if ((b[2] - b[0]) * (b[3] - b[1]) > 0.97) b = null;  // ほとんど余白がない
+    }
+    R.cropBase = b;
+    saveJson('bv_crop_' + id, { stamp, b });
+    if (R.opt.crop) show(R.pos, false);
+  } finally { R.cropBusy = false; }
+}
+// ページごとの切り取り範囲。本全体の余白に、そのページの字や絵がはみ出すならそこまで広げる
+async function cropOf(i, pg) {
+  if (!cropOn()) return [0, 0, 1, 1];
+  const own = await ensureCrop(i, pg), b = R.cropBase;
+  if (own === null) return [0, 0, 1, 1];  // 暗いページは切らない
+  if (own.blank) return b.slice();
+  return [Math.min(b[0], own[0]), Math.min(b[1], own[1]), Math.max(b[2], own[2]), Math.max(b[3], own[3])];
+}
+// 画面に並べる大きさ（w,h＝見える部分、fw,fh＝ページ全体、x,y＝ずらす量）
+async function layoutFor(view, pgs) {
+  const cs = await Promise.all(pgs.map((pg, k) => cropOf(view[k], pg)));
+  if (cs.length > 1) {  // 見開きは上下をそろえる
+    const y0 = Math.min(...cs.map((c) => c[1])), y1 = Math.max(...cs.map((c) => c[3]));
+    cs.forEach((c) => { c[1] = y0; c[3] = y1; });
+  }
+  const sz = sizesFor(pgs.map((pg, k) => ({ w: pg.w * (cs[k][2] - cs[k][0]), h: pg.h * (cs[k][3] - cs[k][1]) })));
+  return sz.map((z, k) => {
+    const c = cs[k], fw = z.w / (c[2] - c[0]), fh = z.h / (c[3] - c[1]);
+    return { w: z.w, h: z.h, fw, fh, x: -c[0] * fw, y: -c[1] * fh };
+  });
+}
+function boxOf(pg) {
+  if (!pg.box) { pg.box = document.createElement('div'); pg.box.className = 'pg'; pg.box.append(pg.el); }
+  return pg.box;
+}
 
 function isSpread() {
   return R.opt.spread === 'double' || (R.opt.spread === 'auto' && stage.clientWidth > stage.clientHeight * 1.05);
@@ -544,11 +715,13 @@ function isSpread() {
 function startOf(i) {
   i = Math.max(0, Math.min(R.src.count - 1, i));
   if (!isSpread()) return i;
+  if (R.wide.size) return wideStarts()[i];
   if (R.opt.shift) return i === 0 ? 0 : i - ((i - 1) % 2);
   return i - (i % 2);
 }
 function viewAt(s) {
   if (!isSpread() || (R.opt.shift && s === 0)) return [s];
+  if (R.wide.size) { const a = wideStarts(); return s + 1 < R.src.count && a[s + 1] === s ? [s, s + 1] : [s]; }
   return [s, s + 1].filter((i) => i < R.src.count);
 }
 function getPage(i) {
@@ -585,11 +758,17 @@ async function show(s, keepZoom) {
   try {
     const pgs = await Promise.all(R.view.map(getPage));
     if (tok !== R.token) return;
-    const sz = sizesFor(pgs);
-    await Promise.all(pgs.map((pg, k) => R.src.place(pg, sz[k].w, sz[k].h, keepZoom ? R.z : 1)));
+    const L = await layoutFor(R.view, pgs);
     if (tok !== R.token) return;
-    pgs.forEach((pg, k) => { pg.el.style.width = sz[k].w + 'px'; pg.el.style.height = sz[k].h + 'px'; });
-    pagesEl.replaceChildren(...pgs.map((pg) => pg.el));
+    await Promise.all(pgs.map((pg, k) => R.src.place(pg, L[k].fw, L[k].fh, keepZoom ? R.z : 1)));
+    if (tok !== R.token) return;
+    pgs.forEach((pg, k) => {
+      const b = boxOf(pg), z = L[k], st = pg.el.style;
+      b.style.width = z.w + 'px'; b.style.height = z.h + 'px';
+      st.width = z.fw + 'px'; st.height = z.fh + 'px'; st.left = z.x + 'px'; st.top = z.y + 'px';
+    });
+    pagesEl.replaceChildren(...pgs.map(boxOf));
+    updateMarkBtn();
     if (!keepZoom) resetZoom();
   } catch (e) {
     if (tok === R.token) toast('読めませんでした：' + errText(e), 4000);
@@ -606,10 +785,12 @@ async function show(s, keepZoom) {
 async function prepare(s, tok) {
   if (s >= R.src.count) return;
   try {
-    const pgs = await Promise.all(viewAt(s).map(getPage));
+    const v = viewAt(s);
+    const pgs = await Promise.all(v.map(getPage));
     if (tok !== R.token) return;
-    const sz = sizesFor(pgs);
-    await Promise.all(pgs.map((pg, k) => R.src.place(pg, sz[k].w, sz[k].h, 1)));
+    const L = await layoutFor(v, pgs);
+    if (tok !== R.token) return;
+    await Promise.all(pgs.map((pg, k) => R.src.place(pg, L[k].fw, L[k].fh, 1)));
   } catch (e) { }
 }
 let nextVolAsk = 0;
@@ -651,6 +832,7 @@ function updateBars() {
   $('spreadBtn').textContent = { auto: '見開き：自動', single: '1ページ', double: '見開き' }[o.spread];
   $('shiftBtn').classList.toggle('on', !!o.shift);
   $('shiftBtn').disabled = !isSpread();
+  $('cropBtn').classList.toggle('on', !!o.crop);
   pagesEl.classList.toggle('rtl', o.dir === 'rtl');
   const sl = $('slider');
   sl.max = n; sl.value = R.pos + 1; sl.classList.toggle('rtl', o.dir === 'rtl');
@@ -670,7 +852,9 @@ function toast(msg, ms) {
 
 async function openBook(item, noPush) {
   R.open = true; R.item = item; R.back = null;
-  R.opt = Object.assign({ dir: 'rtl', spread: 'auto', shift: item.kind === 'zip' }, loadJson('bv_view_' + item.id, {}));
+  R.opt = Object.assign({ dir: 'rtl', spread: 'auto', shift: item.kind === 'zip', crop: item.kind === 'pdf' }, loadJson('bv_view_' + item.id, {}));
+  R.wide = new Set(); R.gs = null; R.crops = new Map(); R.cropBase = undefined;
+  closeMarks();
   $('library').hidden = true; reader.hidden = false; setUi(true);
   $('title').textContent = item.parent && !item.single ? item.parent.title + '／' + item.title : item.title;
   $('searchBtn').hidden = item.kind !== 'pdf'; $('searchBtn').classList.remove('on');
@@ -694,12 +878,17 @@ async function openBook(item, noPush) {
     return;
   }
   const pos = loadJson('bv_pos_' + item.id, null);
+  const src = R.src;
+  if (R.opt.crop) { const sv = loadJson('bv_crop_' + item.id, null); if (sv && sv.stamp === R.stamp) R.cropBase = sv.b; }
   await show(pos && pos.p < R.src.count ? pos.p : 0);
+  if (R.src !== src) return;
+  if (R.opt.crop) findCropBase();
+  findWide(src);
 }
 function closeReader() {
   if (!R.open) return;
   R.open = false; R.back = null;
-  closeSearch(); updateChip();
+  closeSearch(); closeMarks(); updateChip();
   releaseBook();
   pagesEl.replaceChildren();
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
@@ -717,6 +906,12 @@ $('back').onclick = () => history.back();
 $('dirBtn').onclick = () => { R.opt.dir = R.opt.dir === 'rtl' ? 'ltr' : 'rtl'; saveOpt(); updateBars(); };
 $('spreadBtn').onclick = () => {
   R.opt.spread = { auto: 'single', single: 'double', double: 'auto' }[R.opt.spread]; saveOpt(); show(R.pos);
+};
+$('cropBtn').onclick = () => {
+  R.opt.crop = !R.opt.crop; saveOpt(); updateBars();
+  toast(R.opt.crop ? '余白を切ります' : '余白を切りません');
+  if (R.opt.crop && R.cropBase === undefined) findCropBase();
+  show(R.pos);
 };
 $('shiftBtn').onclick = () => { R.opt.shift = !R.opt.shift; saveOpt(); show(R.pos + (R.opt.shift ? 1 : 0)); };
 $('slider').addEventListener('input', () => { $('pageNo').textContent = $('slider').value + ' / ' + R.src.count; });
@@ -777,6 +972,7 @@ async function drawMarks(pg, vp, ctx, q) {
 
 const SR = { tok: 0, hits: [], q: '' };
 function openSearch() {
+  closeMarks();
   $('searchPanel').hidden = false;
   setTimeout(() => $('searchInput').focus(), 50);
 }
@@ -878,7 +1074,7 @@ function updateChip() {
   const q = R.src && R.src.query, back = R.back;
   chip.hidden = !R.open || (!q && back == null);
   if (chip.hidden) return;
-  $('chipText').textContent = '🔍「' + ($('searchInput').value.trim() || q || '') + '」';
+  $('chipText').textContent = q ? '🔍「' + ($('searchInput').value.trim() || q) + '」' : '🔖 しおりのページ';
   $('chipBack').hidden = back == null;
   $('chipBack').textContent = '↩ 元のページ（' + ((back || 0) + 1) + '）へ';
   $('chipHere').hidden = back == null;
@@ -892,6 +1088,70 @@ $('searchInput').addEventListener('keydown', (e) => {
   e.stopPropagation();
   if (e.key === 'Enter') { e.preventDefault(); runSearch(); }
   else if (e.key === 'Escape') closeSearch();
+});
+
+// ---------------- しおり ----------------
+// 本ごとに [{ p: ページ（0から）, memo: ひとこと, t: 付けた時刻 }] をしまう
+const marksOf = () => loadJson('bv_marks_' + R.item.id, []);
+function saveMarks(a) { a.sort((x, y) => x.p - y.p); saveJson('bv_marks_' + R.item.id, a); }
+function updateMarkBtn() {
+  if (!R.item) return;
+  const on = marksOf().some((m) => R.view.includes(m.p));
+  $('markBtn').classList.toggle('on', on);
+}
+function openMarks() {
+  closeSearch();
+  $('markPanel').hidden = false;
+  $('markMemo').value = '';
+  renderMarks();
+}
+function closeMarks() {
+  const wasOpen = !$('markPanel').hidden;
+  $('markPanel').hidden = true;
+  if (!wasOpen) return;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  window.scrollTo(0, 0);
+}
+function renderMarks() {
+  const a = marksOf(), list = $('markList');
+  list.innerHTML = '';
+  const here = a.find((m) => R.view.includes(m.p));
+  $('markAdd').textContent = here ? '✎ このページのひとことを直す' : '＋ このページにしおりを付ける';
+  $('markStatus').textContent = a.length ? 'しおり ' + a.length + ' 個（押すとそのページへ）' : 'まだしおりはありません';
+  for (const m of a) {
+    const row = document.createElement('div'); row.className = 'mrow';
+    const b = document.createElement('button'); b.className = 'hit';
+    const pn = document.createElement('span'); pn.className = 'hp'; pn.textContent = (m.p + 1) + ' ページ';
+    const tx = document.createElement('span'); tx.className = 'ht';
+    const d = new Date(m.t);
+    tx.textContent = (m.memo || '（ひとことなし）') + '　' + (d.getMonth() + 1) + '/' + d.getDate();
+    b.append(pn, tx);
+    if (R.view.includes(m.p)) b.classList.add('here');
+    b.onclick = () => {
+      if (!R.view.includes(m.p) && R.back == null) R.back = R.pos;  // 飛ぶ前に読んでいたページを覚えておく
+      closeMarks(); setUi(false); show(m.p);
+    };
+    const del = document.createElement('button'); del.className = 'btn del'; del.textContent = '外す';
+    del.onclick = () => { saveMarks(marksOf().filter((x) => x.p !== m.p)); renderMarks(); updateMarkBtn(); };
+    row.append(b, del);
+    list.append(row);
+  }
+}
+$('markBtn').onclick = () => ($('markPanel').hidden ? openMarks() : closeMarks());
+$('markClose').onclick = closeMarks;
+$('markAdd').onclick = () => {
+  const a = marksOf(), memo = $('markMemo').value.trim();
+  const here = a.find((m) => R.view.includes(m.p));
+  if (here) { if (memo) here.memo = memo; here.t = Date.now(); }
+  else a.push({ p: R.pos, memo, t: Date.now() });
+  saveMarks(a); $('markMemo').value = '';
+  renderMarks(); updateMarkBtn();
+  toast(here ? 'しおりを直しました' : (R.pos + 1) + ' ページにしおりを付けました');
+};
+$('markMemo').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') { e.preventDefault(); $('markAdd').click(); }
+  else if (e.key === 'Escape') closeMarks();
 });
 
 // ---------------- 拡大と、指での操作 ----------------
@@ -918,8 +1178,9 @@ function sharpen() {
     const tok = R.token;
     const pgs = await Promise.all(R.view.map(getPage));
     if (tok !== R.token) return;
-    const sz = sizesFor(pgs);
-    pgs.forEach((pg, k) => R.src.place(pg, sz[k].w, sz[k].h, R.z));
+    const L = await layoutFor(R.view, pgs);
+    if (tok !== R.token) return;
+    pgs.forEach((pg, k) => R.src.place(pg, L[k].fw, L[k].fh, R.z));
   }, 200);
 }
 
@@ -1017,6 +1278,8 @@ stage.addEventListener('wheel', (e) => {
 document.addEventListener('keydown', (e) => {
   if (!R.open || !R.src || e.altKey || e.metaKey) return;
   if (!$('searchPanel').hidden) { if (e.key === 'Escape') { closeSearch(); e.preventDefault(); } return; }
+  if (!$('markPanel').hidden) { if (e.key === 'Escape') { closeMarks(); e.preventDefault(); } return; }
+  if (e.key === 'b' && !e.ctrlKey) { e.preventDefault(); openMarks(); return; }
   if (R.item.kind === 'pdf' && ((e.ctrlKey && e.key === 'f') || e.key === '/')) { e.preventDefault(); openSearch(); return; }
   const k = e.key;
   if (k === 'ArrowLeft') turn('left');
