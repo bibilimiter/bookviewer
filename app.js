@@ -654,7 +654,7 @@ function toast(msg, ms) {
 
 async function openBook(item, noPush) {
   R.open = true; R.item = item;
-  R.opt = Object.assign({ dir: item.kind === 'zip' ? 'rtl' : 'ltr', spread: 'auto', shift: item.kind === 'zip' }, loadJson('bv_view_' + item.id, {}));
+  R.opt = Object.assign({ dir: 'rtl', spread: 'auto', shift: item.kind === 'zip' }, loadJson('bv_view_' + item.id, {}));
   $('library').hidden = true; reader.hidden = false; setUi(true);
   $('title').textContent = item.parent ? item.parent.title + '／' + item.title : item.title;
   $('searchBtn').hidden = item.kind !== 'pdf'; $('searchBtn').classList.remove('on');
