@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v11';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v12';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -787,30 +787,20 @@ function closeSearch() {
   // キーボードを閉じ、ずれた画面を元にもどして、ページを今の画面の大きさで描きなおす
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   window.scrollTo(0, 0);
-  if (R.open && R.src) setTimeout(() => { window.scrollTo(0, 0); fixViewportZoom(); if (R.open && R.src) show(R.pos, false); }, 400);
+  if (R.open && R.src) setTimeout(() => { window.scrollTo(0, 0); if (R.open && R.src) show(R.pos, false); }, 400);
 }
-// Android（Brave など）で、キーボードを出したあとに画面が拡大したままになることがある。
-// 「全画面にして解除すると直る」ことを実機で確かめたので、Android では検索を閉じるたびに全画面を一瞬はさむ
-const IS_ANDROID = /Android/i.test(navigator.userAgent);
-function viewDiag() {
-  const vv = window.visualViewport;
-  return 'w' + innerWidth + ' h' + innerHeight + ' cw' + document.documentElement.clientWidth +
-    (vv ? ' vw' + Math.round(vv.width) + ' s' + vv.scale.toFixed(2) + ' x' + Math.round(vv.offsetLeft) + ' y' + Math.round(vv.offsetTop) : '') +
-    ' dpr' + (window.devicePixelRatio || 1).toFixed(2) + ' sx' + Math.round(scrollX) + ' sy' + Math.round(scrollY);
+// スマホなのに、ブラウザが「デスクトップ版サイト」（パソコン用の表示）になっていたらお知らせする
+// （Brave でこれがオンになっていて、画面が大きくずれたことがあった）
+function desktopModeOn() {
+  // デスクトップ版サイトのとき、Chrome 系のブラウザは画面の幅を 980 にする（スマホの幅はふつう 360〜430 くらい）
+  const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  return touch && document.documentElement.clientWidth === 980;
 }
-function fixViewportZoom() {
-  saveJson('bv_diag', { before: viewDiag(), t: Date.now() });  // 原因を調べるための数字（本棚の下に出す）
-  if (!IS_ANDROID || !document.documentElement.requestFullscreen) return;
-  const was = !!document.fullscreenElement;
-  const p = was ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-  Promise.resolve(p).then(() => setTimeout(() => {
-    const q = was ? document.documentElement.requestFullscreen() : document.exitFullscreen();
-    Promise.resolve(q).then(() => setTimeout(() => {
-      const d = loadJson('bv_diag', {}); d.after = viewDiag(); saveJson('bv_diag', d);
-      if (R.open && R.src) show(R.pos, false);
-    }, 300)).catch(() => { });
-  }, 250)).catch((e) => { const d = loadJson('bv_diag', {}); d.err = String(e && e.name); saveJson('bv_diag', d); });
+function checkDesktopMode() {
+  const on = desktopModeOn();
+  $('desktopWarn').hidden = !on;
 }
+window.addEventListener('resize', checkDesktopMode);
 // 本の全ページの文字を用意する（一度取り出したら端末にしまっておき、次からはすぐ使う）
 async function bookTexts(tok) {
   const id = R.item.id, stamp = R.stamp;
@@ -1061,11 +1051,9 @@ if ('serviceWorker' in navigator) {
     else location.reload();
   });
 }
-function updateVer() {
-  const d = loadJson('bv_diag', null);
-  $('ver').textContent = 'BookViewer ' + APP_VERSION + (d ? '　［診断 前: ' + d.before + ' ／ 後: ' + (d.after || '-') + (d.err ? ' ／ ' + d.err : '') + '］' : '');
-}
+function updateVer() { $('ver').textContent = 'BookViewer ' + APP_VERSION; removeKey('bv_diag'); }
 updateVer();
+checkDesktopMode();
 (async () => {
   await initDir();
   if (!DIR.items.length) await showLibrary();

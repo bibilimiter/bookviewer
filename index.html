@@ -2,8 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<!-- 文字を入れる欄を押したときに、ブラウザが画面ごと拡大しないように（拡大はアプリの中で指2本でできる） -->
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BookViewer</title>
 <meta name="theme-color" content="#1f2937">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,6 +17,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
+
+<!-- スマホでブラウザが「デスクトップ版サイト」になっているときのお知らせ -->
+<div id="desktopWarn" class="dwarn" hidden>ブラウザが「デスクトップ版サイト」（パソコン用の表示）になっているため、画面がずれます。ブラウザのメニュー（︙）で「デスクトップ版サイト」のチェックを外してください。</div>
 
 <!-- 本棚 -->
 <section id="library" class="view">
