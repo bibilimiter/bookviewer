@@ -1,6 +1,8 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
+const APP_VERSION = 'v7';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
 const CMAP_URL = new URL('cmaps/', location.href).href;
@@ -690,6 +692,7 @@ function closeReader() {
   pagesEl.replaceChildren();
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
   reader.hidden = true; $('loading').hidden = true;
+  if (pendingReload) { location.reload(); return; }
   if (SET.open) { $('setView').hidden = false; renderSet(); }
   else { $('library').hidden = false; showLibrary(); }
 }
@@ -1001,7 +1004,22 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 // ---------------- はじめに ----------------
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
+// 新しい版が届いたら入れかえる（読んでいる最中なら、本棚にもどったときに）
+let pendingReload = false;
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    // アプリを開きなおしたとき（ホーム画面から戻ったときも）に、新しい版がないかたしかめる
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => { }); });
+  }).catch(() => { });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || pendingReload) return;
+    pendingReload = true;
+    if (R.open) toast('新しい版が届きました。本棚にもどると入れかわります', 3000);
+    else location.reload();
+  });
+}
+$('ver').textContent = 'BookViewer ' + APP_VERSION;
 (async () => {
   await initDir();
   if (!DIR.items.length) await showLibrary();
