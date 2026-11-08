@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v8';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v9';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -779,7 +779,13 @@ function openSearch() {
   $('searchPanel').hidden = false;
   setTimeout(() => $('searchInput').focus(), 50);
 }
-function closeSearch() { SR.tok++; $('searchPanel').hidden = true; }
+function closeSearch() {
+  SR.tok++; $('searchPanel').hidden = true;
+  // キーボードを閉じ、ずれた画面を元にもどして、ページを今の画面の大きさで描きなおす
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  window.scrollTo(0, 0);
+  if (R.open && R.src) setTimeout(() => { window.scrollTo(0, 0); if (R.open && R.src) show(R.pos, false); }, 350);
+}
 // 本の全ページの文字を用意する（一度取り出したら端末にしまっておき、次からはすぐ使う）
 async function bookTexts(tok) {
   const id = R.item.id, stamp = R.stamp;
