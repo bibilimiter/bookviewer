@@ -40,6 +40,7 @@ const dbGet = (s, k) => dbDo(s, 'readonly', (o) => o.get(k));
 const dbPut = (s, k, v) => dbDo(s, 'readwrite', (o) => o.put(v, k));
 const dbDel = (s, k) => dbDo(s, 'readwrite', (o) => o.delete(k));
 const dbAll = (s) => dbDo(s, 'readonly', (o) => o.getAll());
+const dbKeys = (s) => dbDo(s, 'readonly', (o) => o.getAllKeys());
 
 function loadJson(key, def) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
 function saveJson(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { } }
@@ -138,10 +139,19 @@ function loadImage(blob) {
 
 // ---------------- 本の中身を読む部品（漫画＝ZIP、小説＝PDF） ----------------
 // どちらも count（ページ数）、load(i)（i ページ目を用意する）、place(ページ, 幅, 高さ, 拡大率)（その大きさで見せる用意）、close() を持つ
+const hiddenName = (name) => /(^|\/)(__MACOSX\/|\.)/.test(name);
+const byName = (a, b) => collator.compare(a.name, b.name);
+// ZIP の中の画像（ページ）を、名前の順に
+const zipPages = (zip) => zip.entries.filter((e) => IMG_RE.test(e.name) && !hiddenName(e.name)).sort(byName);
+// ZIP の中に入っている巻ごとの ZIP・PDF（画像が1枚もないときだけ「何巻かのまとめ」とみなす）
+function zipVolumes(zip) {
+  if (zipPages(zip).length) return null;
+  const v = zip.entries.filter((e) => BOOK_RE.test(e.name) && !hiddenName(e.name)).sort(byName);
+  return v.length ? v : null;
+}
 async function zipSource(blob) {
   const zip = await openZip(blob);
-  const pages = zip.entries.filter((e) => IMG_RE.test(e.name) && !/(^|\/)(__MACOSX\/|\.)/.test(e.name))
-    .sort((a, b) => collator.compare(a.name, b.name));
+  const pages = zipPages(zip);
   if (!pages.length) throw new Error('ZIP の中に画像がありません');
   return {
     count: pages.length,
@@ -227,6 +237,14 @@ async function makeThumb({ img, url }) {
 }
 // 本1冊から、表紙の絵とページ数を作る
 async function makeCover(blob, kind) {
+  if (kind === 'zip') {
+    const zip = await openZip(blob);
+    const vols = zipVolumes(zip);
+    if (vols) {  // 何巻かのまとめ：1巻目の表紙を使う
+      const c = await makeCover(await zip.blob(vols[0], ''), kindOf(vols[0].name));
+      return { blob: c.blob, n: vols.length, set: true };
+    }
+  }
   const src = await openSource(blob, kind);
   try { return { blob: await src.thumb(), n: src.count }; }
   finally { src.close(); }
@@ -291,6 +309,12 @@ const libUrls = [];
 let coverQueue = [], coverBusy = false;
 
 async function getBookFile(item) {
+  if (item.parent) {  // まとめの中の1巻：外の ZIP から、その巻だけを取り出す（縮めずに入れてあれば、写さずにそのまま読む）
+    const zip = await openZip(await getBookFile(item.parent));
+    const e = zip.entries.find((x) => x.name === item.entry);
+    if (!e) throw new Error('「' + item.title + '」が見つかりません');
+    return zip.blob(e, item.kind === 'pdf' ? 'application/pdf' : 'application/zip');
+  }
   if (item.src === 'dir') return item.handle.getFile();
   const f = await dbGet('files', item.id);
   if (!f) throw new Error('本の中身が見つかりません。取りこみなおしてください');
@@ -299,7 +323,7 @@ async function getBookFile(item) {
 function progressOf(item, n) {
   const pos = loadJson('bv_pos_' + item.id, null);
   const total = (pos && pos.n) || n || 0;
-  if (!pos) return { text: total ? total + ' ページ・未読' : '未読', ratio: 0 };
+  if (!pos || pos.p == null) return { text: total ? total + ' ページ・未読' : '未読', ratio: 0 };
   if (total && pos.p >= total - 2) return { text: '読み終わり', ratio: 1 };
   return { text: (pos.p + 1) + ' / ' + (total || '?') + ' ページ', ratio: total ? (pos.p + 1) / total : 0 };
 }
@@ -321,43 +345,7 @@ async function showLibrary() {
       : '「＋ 本を取りこむ」で、漫画（JPEG の入った ZIP）や小説（PDF）を選んでください。<br>本はこの端末の中にしまうので、次からはネットなしで読めます。';
   } else if (!hint.dataset.busy) hint.hidden = true;
 
-  for (const it of items) {
-    const el = document.createElement('div'); el.className = 'book';
-    el.title = (it.folder || '') + it.title;
-    const cv = document.createElement('div'); cv.className = 'cv'; cv.textContent = it.kind === 'pdf' ? 'PDF' : '漫画';
-    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = it.kind === 'pdf' ? 'PDF' : '漫画';
-    const bar = document.createElement('div'); bar.className = 'bar2'; const fill = document.createElement('i'); bar.append(fill);
-    const ti = document.createElement('div'); ti.className = 't'; ti.textContent = it.title;
-    const p = document.createElement('div'); p.className = 'p';
-    const pt = document.createElement('span'); p.append(pt);
-    const setProg = (n) => { const g = progressOf(it, n); pt.textContent = g.text; fill.style.width = Math.round(g.ratio * 100) + '%'; };
-    setProg(0);
-    if (it.src === 'local') {
-      const del = document.createElement('button'); del.className = 'btn del'; del.textContent = '消す';
-      del.onclick = async (ev) => {
-        ev.stopPropagation();
-        if (!confirm('「' + it.title + '」をこの端末から消しますか？\n（取りこむ前のもとのファイルは消えません）')) return;
-        await dbDel('files', it.id); await dbDel('covers', it.id); await dbDel('books', it.id);
-        removeKey('bv_pos_' + it.id); removeKey('bv_view_' + it.id);
-        showLibrary();
-      };
-      p.append(del);
-    }
-    el.append(cv, ti, p);
-    el.onclick = () => openBook(it);
-    box.append(el);
-    const showCover = (c) => {
-      if (!c || !c.blob) return;
-      const u = URL.createObjectURL(c.blob); libUrls.push(u);
-      const img = document.createElement('img'); img.alt = ''; img.src = u;
-      cv.textContent = ''; cv.append(img, tag, bar); setProg(c.n);
-    };
-    dbGet('covers', it.id).then((c) => {
-      showCover(c);
-      // フォルダの本は、ファイルが変わっていたら表紙を作りなおす。表紙のない本は作る
-      if (!c || it.src === 'dir') { coverQueue.push({ it, cached: c, showCover }); runCoverQueue(); }
-    }).catch(() => { });
-  }
+  renderCards(box, items);
   if (navigator.storage && navigator.storage.estimate) {
     try {
       const e = await navigator.storage.estimate();
@@ -366,6 +354,96 @@ async function showLibrary() {
     } catch (e) { }
   }
 }
+// 本の札を並べる（本棚と、巻の一覧で使う）
+function renderCards(box, items) {
+  for (const it of items) {
+    const el = document.createElement('div'); el.className = 'book';
+    el.title = (it.folder || '') + it.title;
+    const label = it.kind === 'pdf' ? 'PDF' : '漫画';
+    const cv = document.createElement('div'); cv.className = 'cv'; cv.textContent = label;
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = label;
+    const bar = document.createElement('div'); bar.className = 'bar2'; const fill = document.createElement('i'); bar.append(fill);
+    const ti = document.createElement('div'); ti.className = 't'; ti.textContent = it.title;
+    const p = document.createElement('div'); p.className = 'p';
+    const pt = document.createElement('span'); p.append(pt);
+    const setProg = (c) => {
+      if (c && c.set) {  // 何巻かのまとめ
+        tag.textContent = '全' + c.n + '巻';
+        const last = loadJson('bv_pos_' + it.id, null);
+        pt.textContent = '全' + c.n + '巻' + (last && last.vol ? '・' + baseName(last.vol) + ' を読んでいます' : '');
+        fill.style.width = '0';
+        return;
+      }
+      const g = progressOf(it, c ? c.n : 0); pt.textContent = g.text; fill.style.width = Math.round(g.ratio * 100) + '%';
+    };
+    setProg(null);
+    if (it.src === 'local' && !it.parent) {
+      const del = document.createElement('button'); del.className = 'btn del'; del.textContent = '消す';
+      del.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!confirm('「' + it.title + '」をこの端末から消しますか？\n（取りこむ前のもとのファイルは消えません）')) return;
+        await dbDel('files', it.id); await dbDel('covers', it.id); await dbDel('books', it.id);
+        // まとめの中の巻の表紙と、読んだ位置も消す
+        try { for (const k of await dbKeys('covers')) if (String(k).startsWith(it.id + '#')) await dbDel('covers', k); } catch (e) { }
+        try {
+          for (const k of Object.keys(localStorage)) {
+            if (k === 'bv_pos_' + it.id || k === 'bv_view_' + it.id || k.startsWith('bv_pos_' + it.id + '#') || k.startsWith('bv_view_' + it.id + '#')) removeKey(k);
+          }
+        } catch (e) { }
+        showLibrary();
+      };
+      p.append(del);
+    }
+    el.append(cv, ti, p);
+    el.onclick = () => openItem(it);
+    box.append(el);
+    const showCover = (c) => {
+      if (!c || !c.blob) return;
+      const u = URL.createObjectURL(c.blob); libUrls.push(u);
+      const img = document.createElement('img'); img.alt = ''; img.src = u;
+      cv.textContent = ''; cv.append(img, tag, bar); setProg(c);
+    };
+    dbGet('covers', it.id).then((c) => {
+      showCover(c);
+      // フォルダの本は、ファイルが変わっていたら表紙を作りなおす。表紙のない本は作る
+      if (!c || it.src === 'dir') { coverQueue.push({ it, cached: c, showCover }); runCoverQueue(); }
+    }).catch(() => { });
+  }
+}
+
+// ---------------- 何巻かのまとめ（ZIP の中に、巻ごとの ZIP が入っているもの） ----------------
+const SET = { item: null, vols: [], open: false };
+// 本を押したとき：まとめなら巻の一覧を、ふつうの本なら読む画面を出す
+async function openItem(it) {
+  if (it.kind === 'zip' && !it.parent) {
+    let vols = null;
+    try { vols = zipVolumes(await openZip(await getBookFile(it))); } catch (e) { }
+    if (vols) { showSet(it, vols); return; }
+  }
+  openBook(it);
+}
+function showSet(it, vols) {
+  SET.item = it; SET.open = true;
+  SET.vols = vols.map((e) => ({ id: it.id + '#' + e.name, title: baseName(e.name), entry: e.name, kind: kindOf(e.name),
+    parent: it, src: it.src, handle: it.handle }));
+  history.pushState({ set: 1 }, '');
+  $('library').hidden = true; $('setView').hidden = false;
+  window.scrollTo(0, 0);
+  renderSet();
+}
+function renderSet() {
+  libUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
+  coverQueue = [];
+  $('setTitle').textContent = SET.item.title + '（全' + SET.vols.length + '巻）';
+  const box = $('vols'); box.innerHTML = '';
+  renderCards(box, SET.vols);
+}
+function closeSet() {
+  SET.open = false;
+  $('setView').hidden = true; $('library').hidden = false;
+  showLibrary();
+}
+$('setBack').onclick = () => history.back();
 // 表紙は1冊ずつ順に作る（いっぺんに作るとメモリが足りなくなる）
 async function runCoverQueue() {
   if (coverBusy) return;
@@ -496,10 +574,28 @@ async function prepare(s, tok) {
     await Promise.all(pgs.map((pg, k) => R.src.place(pg, sz[k].w, sz[k].h, 1)));
   } catch (e) { }
 }
+let nextVolAsk = 0;
 function next() {
-  if (R.pos + R.view.length < R.src.count) show(R.pos + R.view.length);
-  else toast('最後のページです');
+  if (R.pos + R.view.length < R.src.count) { show(R.pos + R.view.length); return; }
+  const nv = nextVolume();
+  if (!nv) { toast('最後のページです'); return; }
+  // 最後のページで、もう一度めくると次の巻へ（うっかり進まないように）
+  if (Date.now() - nextVolAsk < 3000) { nextVolAsk = 0; switchVolume(nv); return; }
+  nextVolAsk = Date.now();
+  toast('最後のページです。もう一度めくると「' + nv.title + '」へ', 3000);
 }
+function nextVolume() {
+  if (!R.item || !R.item.parent || !SET.open) return null;
+  const i = SET.vols.findIndex((v) => v.id === R.item.id);
+  return i >= 0 && i + 1 < SET.vols.length ? SET.vols[i + 1] : null;
+}
+function releaseBook() {
+  R.token++;
+  for (const i of [...R.cache.keys()]) freePage(i);
+  if (R.src) { try { R.src.close(); } catch (e) { } }
+  R.src = null;
+}
+function switchVolume(v) { releaseBook(); openBook(v, true); }
 function prev() {
   if (R.pos > 0) show(R.pos - 1);
   else toast('最初のページです');
@@ -534,14 +630,16 @@ function toast(msg, ms) {
   toastTimer = setTimeout(() => { el.hidden = true; el.textContent = '読みこんでいます…'; }, ms || 1200);
 }
 
-async function openBook(item) {
+async function openBook(item, noPush) {
   R.open = true; R.item = item;
   R.opt = Object.assign({ dir: item.kind === 'zip' ? 'rtl' : 'ltr', spread: 'auto', shift: item.kind === 'zip' }, loadJson('bv_view_' + item.id, {}));
   $('library').hidden = true; reader.hidden = false; setUi(true);
-  $('title').textContent = item.title;
+  $('title').textContent = item.parent ? item.parent.title + '／' + item.title : item.title;
   pagesEl.replaceChildren();
   $('loading').textContent = '読みこんでいます…'; $('loading').hidden = false;
-  history.pushState({ reader: 1 }, '');
+  if (!noPush) history.pushState({ reader: 1 }, '');
+  if (item.parent) saveJson('bv_pos_' + item.parent.id, { vol: item.entry, t: Date.now() });  // まとめの中で、どの巻を読んでいるか
+  $('setView').hidden = true;
   const tok = ++R.token;
   try {
     const f = await getBookFile(item);
@@ -559,16 +657,18 @@ async function openBook(item) {
 }
 function closeReader() {
   if (!R.open) return;
-  R.open = false; R.token++;
-  for (const i of [...R.cache.keys()]) freePage(i);
-  if (R.src) { try { R.src.close(); } catch (e) { } }
-  R.src = null;
+  R.open = false;
+  releaseBook();
   pagesEl.replaceChildren();
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
-  reader.hidden = true; $('library').hidden = false; $('loading').hidden = true;
-  showLibrary();
+  reader.hidden = true; $('loading').hidden = true;
+  if (SET.open) { $('setView').hidden = false; renderSet(); }
+  else { $('library').hidden = false; showLibrary(); }
 }
-window.addEventListener('popstate', () => { if (R.open) closeReader(); });
+window.addEventListener('popstate', () => {
+  if (R.open) closeReader();
+  else if (SET.open) closeSet();
+});
 $('back').onclick = () => history.back();
 
 $('dirBtn').onclick = () => { R.opt.dir = R.opt.dir === 'rtl' ? 'ltr' : 'rtl'; saveOpt(); updateBars(); };
