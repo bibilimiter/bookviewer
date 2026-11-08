@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v10';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v11';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -349,6 +349,7 @@ function progressOf(item, n) {
 }
 
 async function showLibrary() {
+  if (typeof updateVer === 'function') updateVer();
   libUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
   coverQueue = [];
   let local = [];
@@ -780,41 +781,35 @@ function openSearch() {
   setTimeout(() => $('searchInput').focus(), 50);
 }
 function closeSearch() {
+  const wasOpen = !$('searchPanel').hidden;
   SR.tok++; $('searchPanel').hidden = true;
+  if (!wasOpen) return;
   // キーボードを閉じ、ずれた画面を元にもどして、ページを今の画面の大きさで描きなおす
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   window.scrollTo(0, 0);
   if (R.open && R.src) setTimeout(() => { window.scrollTo(0, 0); fixViewportZoom(); if (R.open && R.src) show(R.pos, false); }, 400);
 }
-// Android（Brave など）で、キーボードを出したあとにブラウザの拡大が残ってしまうことがあるので、元の大きさにもどす
-// 1. 画面の設定（viewport）を書きなおす  2. だめなら、全画面にしてすぐもどす（これで直ることを実機で確認ずみ）
-function fixViewportZoom() {
+// Android（Brave など）で、キーボードを出したあとに画面が拡大したままになることがある。
+// 「全画面にして解除すると直る」ことを実機で確かめたので、Android では検索を閉じるたびに全画面を一瞬はさむ
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+function viewDiag() {
   const vv = window.visualViewport;
-  if (!vv || vv.scale <= 1.01) return;
-  const m = document.querySelector('meta[name=viewport]'), orig = m.content;
-  m.content = 'width=device-width, initial-scale=1.001, minimum-scale=1, maximum-scale=1.001, viewport-fit=cover';
-  setTimeout(() => {
-    m.content = orig;
-    setTimeout(() => {
-      if (vv.scale <= 1.01 || !document.documentElement.requestFullscreen) return;
-      const was = !!document.fullscreenElement;
-      const toggle = was ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-      Promise.resolve(toggle).then(() => setTimeout(() => {
-        (was ? document.documentElement.requestFullscreen() : document.exitFullscreen()).catch(() => { });
-      }, 200)).catch(() => { });
-    }, 150);
-  }, 150);
+  return 'w' + innerWidth + ' h' + innerHeight + ' cw' + document.documentElement.clientWidth +
+    (vv ? ' vw' + Math.round(vv.width) + ' s' + vv.scale.toFixed(2) + ' x' + Math.round(vv.offsetLeft) + ' y' + Math.round(vv.offsetTop) : '') +
+    ' dpr' + (window.devicePixelRatio || 1).toFixed(2) + ' sx' + Math.round(scrollX) + ' sy' + Math.round(scrollY);
 }
-// ほかの時（キーボードを閉じたあとなど）にも、拡大が残っていたら直す
-if (window.visualViewport) {
-  let vvTimer = 0;
-  window.visualViewport.addEventListener('resize', () => {
-    clearTimeout(vvTimer);
-    vvTimer = setTimeout(() => {
-      const ae = document.activeElement;
-      if (R.open && !(ae && ae.tagName === 'INPUT' && ae.type !== 'range')) fixViewportZoom();
-    }, 500);
-  });
+function fixViewportZoom() {
+  saveJson('bv_diag', { before: viewDiag(), t: Date.now() });  // 原因を調べるための数字（本棚の下に出す）
+  if (!IS_ANDROID || !document.documentElement.requestFullscreen) return;
+  const was = !!document.fullscreenElement;
+  const p = was ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  Promise.resolve(p).then(() => setTimeout(() => {
+    const q = was ? document.documentElement.requestFullscreen() : document.exitFullscreen();
+    Promise.resolve(q).then(() => setTimeout(() => {
+      const d = loadJson('bv_diag', {}); d.after = viewDiag(); saveJson('bv_diag', d);
+      if (R.open && R.src) show(R.pos, false);
+    }, 300)).catch(() => { });
+  }, 250)).catch((e) => { const d = loadJson('bv_diag', {}); d.err = String(e && e.name); saveJson('bv_diag', d); });
 }
 // 本の全ページの文字を用意する（一度取り出したら端末にしまっておき、次からはすぐ使う）
 async function bookTexts(tok) {
@@ -1066,7 +1061,11 @@ if ('serviceWorker' in navigator) {
     else location.reload();
   });
 }
-$('ver').textContent = 'BookViewer ' + APP_VERSION;
+function updateVer() {
+  const d = loadJson('bv_diag', null);
+  $('ver').textContent = 'BookViewer ' + APP_VERSION + (d ? '　［診断 前: ' + d.before + ' ／ 後: ' + (d.after || '-') + (d.err ? ' ／ ' + d.err : '') + '］' : '');
+}
+updateVer();
 (async () => {
   await initDir();
   if (!DIR.items.length) await showLibrary();
