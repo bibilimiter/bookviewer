@@ -2,6 +2,9 @@
 'use strict';
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
+const CMAP_URL = new URL('cmaps/', location.href).href;
+const FONT_URL = new URL('standard_fonts/', location.href).href;
 const $ = (id) => document.getElementById(id);
 const IMG_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const BOOK_RE = /\.(zip|cbz|pdf)$/i;
@@ -15,11 +18,11 @@ const errText = (e) => (e && e.message ? e.message : String(e));
 
 // ---------------- しまっておく所（IndexedDB と localStorage） ----------------
 // books：取りこんだ本の情報 / files：取りこんだ本の中身 / covers：表紙の小さな絵とページ数 / meta：選んだフォルダ
-const DB_NAME = 'bookviewer', STORES = ['books', 'files', 'covers', 'meta'];
+const DB_NAME = 'bookviewer', STORES = ['books', 'files', 'covers', 'meta', 'texts'];  // texts：PDF から取り出した文字（検索用）
 let dbP = null;
 function openDb() {
   if (!dbP) dbP = new Promise((ok, ng) => {
-    const r = indexedDB.open(DB_NAME, 1);
+    const r = indexedDB.open(DB_NAME, 2);
     r.onupgradeneeded = () => { for (const s of STORES) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s); };
     r.onsuccess = () => ok(r.result);
     r.onerror = () => ng(r.error);
@@ -175,7 +178,8 @@ async function pdfSource(blob) {
   range.requestDataRange = (begin, end) => {
     blob.slice(begin, end).arrayBuffer().then((b) => range.onDataRange(begin, new Uint8Array(b)));
   };
-  const task = pdfjsLib.getDocument({ range, length: blob.size, disableAutoFetch: true, disableStream: true, rangeChunkSize: 262144 });
+  const task = pdfjsLib.getDocument({ range, length: blob.size, disableAutoFetch: true, disableStream: true, rangeChunkSize: 262144,
+    cMapUrl: CMAP_URL, cMapPacked: true, standardFontDataUrl: FONT_URL });
   const pdf = await task.promise;
   const src = {
     count: pdf.numPages,
@@ -202,12 +206,24 @@ async function pdfSource(blob) {
       try { await job.promise; }
       catch (e) { tmp.width = tmp.height = 0; if (e && e.name === 'RenderingCancelledException') return; throw e; }
       if (pg.job === job) pg.job = null;
+      if (src.query) {  // 検索した言葉に色を付ける
+        try { await drawMarks(pg, vp, tmp.getContext('2d'), src.query); } catch (e) { }
+        if (pg.job) { tmp.width = tmp.height = 0; return; }
+      }
       pg.el.width = tmp.width; pg.el.height = tmp.height;
       pg.el.getContext('2d').drawImage(tmp, 0, 0);
       tmp.width = tmp.height = 0;
       pg.scale = s;
     },
     close() { task.destroy(); },
+    query: '',
+    // i ページ目の文字（検索用）
+    async text(i) {
+      const page = await pdf.getPage(i + 1);
+      const tc = await page.getTextContent();
+      page.cleanup();
+      return tc.items.map((it) => (it.str || '') + (it.hasEOL ? '\n' : '')).join('');
+    },
     async thumb() {
       const page = await pdf.getPage(1);
       const vp0 = page.getViewport({ scale: 1 });
@@ -641,6 +657,8 @@ async function openBook(item, noPush) {
   R.opt = Object.assign({ dir: item.kind === 'zip' ? 'rtl' : 'ltr', spread: 'auto', shift: item.kind === 'zip' }, loadJson('bv_view_' + item.id, {}));
   $('library').hidden = true; reader.hidden = false; setUi(true);
   $('title').textContent = item.parent ? item.parent.title + '／' + item.title : item.title;
+  $('searchBtn').hidden = item.kind !== 'pdf'; $('searchBtn').classList.remove('on');
+  closeSearch(); $('searchInput').value = ''; $('searchList').innerHTML = ''; $('searchStatus').textContent = '';
   pagesEl.replaceChildren();
   $('loading').textContent = '読みこんでいます…'; $('loading').hidden = false;
   if (!noPush) history.pushState({ reader: 1 }, '');
@@ -649,6 +667,7 @@ async function openBook(item, noPush) {
   const tok = ++R.token;
   try {
     const f = await getBookFile(item);
+    R.stamp = f.size + ':' + (f.lastModified || 0);
     const src = await openSource(f, item.kind);
     if (tok !== R.token || !R.open) { src.close(); return; }
     R.src = src;
@@ -664,6 +683,7 @@ async function openBook(item, noPush) {
 function closeReader() {
   if (!R.open) return;
   R.open = false;
+  closeSearch();
   releaseBook();
   pagesEl.replaceChildren();
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
@@ -695,6 +715,118 @@ let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { if (R.open && R.src) show(R.pos); }, 150);
+});
+
+// ---------------- PDF の中の文字で探す ----------------
+// 比べるときは、全角／半角のちがいと空白・改行を無視する
+const norm = (t) => t.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+// ページの中で、言葉が見つかった所（文字のかたまりごとに、はじからはじまでの割合）
+function findMarks(items, q) {
+  let stream = ''; const map = [];
+  items.forEach((it, k) => {
+    const chars = [...(it.str || '')];
+    chars.forEach((ch, c) => { const n = norm(ch); for (let u = 0; u < n.length; u++) { stream += n[u]; map.push({ k, c, len: chars.length }); } });
+  });
+  const out = [];
+  for (let at = stream.indexOf(q); at >= 0 && q; at = stream.indexOf(q, at + q.length)) {
+    const parts = {};
+    for (const m of map.slice(at, at + q.length)) {
+      const g = parts[m.k] || (parts[m.k] = { k: m.k, c0: m.c, c1: m.c, len: m.len });
+      g.c0 = Math.min(g.c0, m.c); g.c1 = Math.max(g.c1, m.c);
+    }
+    for (const g of Object.values(parts)) out.push({ it: items[g.k], f0: g.c0 / g.len, f1: (g.c1 + 1) / g.len });
+  }
+  return out;
+}
+async function drawMarks(pg, vp, ctx, q) {
+  if (!pg.items) pg.items = (await pg.page.getTextContent()).items;
+  const marks = findMarks(pg.items, q);
+  if (!marks.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = 'rgba(255, 196, 0, 0.75)';
+  for (const m of marks) {
+    const [a, b, c, d, e, f] = m.it.transform;
+    const la = Math.hypot(a, b) || 1, lc = Math.hypot(c, d) || 1;
+    const w = m.it.width, h = m.it.height || lc;
+    // 字の並ぶ向き（a,b）と、字の上の向き（c,d）から、四すみを出す（縦書きでも横書きでも）
+    const pts = [[w * m.f0, -0.25 * h], [w * m.f1, -0.25 * h], [w * m.f1, h], [w * m.f0, h]]
+      .map(([sx, ty]) => vp.convertToViewportPoint(e + (a / la) * sx + (c / lc) * ty, f + (b / la) * sx + (d / lc) * ty));
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    ctx.fillRect(Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  }
+  ctx.restore();
+}
+
+const SR = { tok: 0, hits: [], q: '' };
+function openSearch() {
+  $('searchPanel').hidden = false;
+  setTimeout(() => $('searchInput').focus(), 50);
+}
+function closeSearch() { SR.tok++; $('searchPanel').hidden = true; }
+// 本の全ページの文字を用意する（一度取り出したら端末にしまっておき、次からはすぐ使う）
+async function bookTexts(tok) {
+  const id = R.item.id, stamp = R.stamp;
+  let rec = null;
+  try { rec = await dbGet('texts', id); } catch (e) { }
+  if (rec && rec.stamp === stamp && rec.pages && rec.pages.length === R.src.count) return rec.pages;
+  const src = R.src, pages = [];
+  for (let i = 0; i < src.count; i++) {
+    if (tok !== SR.tok || src !== R.src) return null;
+    $('searchStatus').textContent = '本の文字を読みこんでいます（' + (i + 1) + ' / ' + src.count + ' ページ）…　はじめの1回だけです';
+    try { pages.push(await src.text(i)); } catch (e) { pages.push(''); }
+  }
+  try { await dbPut('texts', id, { stamp, pages }); } catch (e) { }
+  return pages;
+}
+async function runSearch() {
+  const raw = $('searchInput').value.trim(), q = norm(raw);
+  const tok = ++SR.tok;
+  const list = $('searchList'); list.innerHTML = '';
+  if (!q) { setQuery(''); $('searchStatus').textContent = ''; return; }
+  const pages = await bookTexts(tok);
+  if (!pages || tok !== SR.tok) return;
+  const hits = [];
+  let empty = 0;
+  pages.forEach((t, i) => {
+    const n = norm(t);
+    if (!n) empty++;
+    for (let at = n.indexOf(q); at >= 0; at = n.indexOf(q, at + q.length)) {
+      hits.push({ p: i, before: n.slice(Math.max(0, at - 18), at), word: n.substr(at, q.length), after: n.substr(at + q.length, 18) });
+      if (hits.length >= 1000) break;
+    }
+  });
+  SR.hits = hits; SR.q = q;
+  $('searchStatus').textContent = hits.length ? '「' + raw + '」が ' + hits.length + (hits.length >= 1000 ? ' 件以上' : ' 件') + '見つかりました'
+    : (empty === pages.length ? 'この PDF には文字が入っていないようです（画像だけの PDF は探せません）' : '「' + raw + '」は見つかりませんでした');
+  for (const h of hits) {
+    const li = document.createElement('button'); li.className = 'hit';
+    const pn = document.createElement('span'); pn.className = 'hp'; pn.textContent = (h.p + 1) + ' ページ';
+    const tx = document.createElement('span'); tx.className = 'ht';
+    const mk = document.createElement('mark'); mk.textContent = h.word;
+    tx.append('…' + h.before, mk, h.after + '…');
+    li.append(pn, tx);
+    li.onclick = () => { setQuery(q); closeSearch(); setUi(false); show(h.p); };
+    list.append(li);
+  }
+  setQuery(q);
+}
+// 色を付ける言葉を変えたら、いま出ているページを描きなおす
+function setQuery(q) {
+  if (!R.src || R.item.kind !== 'pdf' || R.src.query === q) return;
+  R.src.query = q;
+  for (const p of R.cache.values()) p.then((pg) => { pg.scale = 0; }).catch(() => { });
+  $('searchBtn').classList.toggle('on', !!q);
+  Promise.resolve().then(() => show(R.pos, true));
+}
+$('searchBtn').onclick = openSearch;
+$('searchClose').onclick = closeSearch;
+$('searchGo').onclick = runSearch;
+$('searchClear').onclick = () => { $('searchInput').value = ''; SR.tok++; $('searchList').innerHTML = ''; $('searchStatus').textContent = ''; setQuery(''); };
+$('searchInput').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') { e.preventDefault(); runSearch(); }
+  else if (e.key === 'Escape') closeSearch();
 });
 
 // ---------------- 拡大と、指での操作 ----------------
@@ -819,6 +951,8 @@ stage.addEventListener('wheel', (e) => {
 // キーボード（Windows）
 document.addEventListener('keydown', (e) => {
   if (!R.open || !R.src || e.altKey || e.metaKey) return;
+  if (!$('searchPanel').hidden) { if (e.key === 'Escape') { closeSearch(); e.preventDefault(); } return; }
+  if (R.item.kind === 'pdf' && ((e.ctrlKey && e.key === 'f') || e.key === '/')) { e.preventDefault(); openSearch(); return; }
   const k = e.key;
   if (k === 'ArrowLeft') turn('left');
   else if (k === 'ArrowRight') turn('right');

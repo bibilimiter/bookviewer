@@ -54,11 +54,21 @@
   <header id="topBar" class="bar overlay top">
     <button id="back" class="btn">‹ 本棚</button>
     <span id="title" class="title"></span>
+    <button id="searchBtn" class="btn" title="文字で探す（PDF）" hidden>🔍</button>
     <button id="dirBtn" class="btn" title="右開き／左開き"></button>
     <button id="spreadBtn" class="btn" title="見開き"></button>
     <button id="shiftBtn" class="btn" title="見開きの組み合わせを1ページずらす">ずらす</button>
     <button id="fullBtn" class="btn" title="画面いっぱい" hidden>⛶</button>
   </header>
+  <aside id="searchPanel" class="search" hidden>
+    <div class="srow">
+      <input id="searchInput" type="search" placeholder="探す言葉" enterkeyhint="search" autocomplete="off">
+      <button id="searchGo" class="btn primary">探す</button>
+      <button id="searchClose" class="btn" title="閉じる">✕</button>
+    </div>
+    <div class="srow small2"><span id="searchStatus" class="sstat"></span><button id="searchClear" class="btn tiny">色を消す</button></div>
+    <div id="searchList" class="slist"></div>
+  </aside>
   <footer id="bottomBar" class="bar overlay bottom">
     <input id="slider" type="range" min="1" max="1" value="1">
     <span id="pageNo" class="pageno"></span>

@@ -68,3 +68,19 @@ body { -webkit-text-size-adjust: 100%; }
 .book.current .cv { border: 3px solid #f59e0b; }
 .book.current .t { color: #fbbf24; font-weight: bold; }
 .book .mark { position: absolute; right: 4px; top: 4px; background: #f59e0b; color: #111; font-size: 11px; font-weight: bold; padding: 1px 6px; border-radius: 4px; }
+
+/* 文字で探す */
+.search { position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 30; background: var(--panel);
+  border-left: 1px solid var(--line); display: flex; flex-direction: column; padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom)); gap: 8px; }
+.srow { display: flex; gap: 6px; align-items: center; }
+.srow input { flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: #111827; color: var(--text); }
+.small2 { font-size: 13px; color: var(--sub); justify-content: space-between; }
+.sstat { flex: 1; line-height: 1.4; }
+.btn.tiny { padding: 3px 8px; font-size: 12px; }
+.slist { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 2px; }
+.hit { display: flex; gap: 10px; align-items: baseline; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  color: var(--text); padding: 10px 4px; font-size: 14px; cursor: pointer; font-family: inherit; line-height: 1.5; }
+.hit:hover { background: #374151; }
+.hp { flex: none; width: 64px; color: var(--sub); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ht { word-break: break-all; }
+.ht mark { background: #f59e0b; color: #111; border-radius: 2px; padding: 0 1px; }
