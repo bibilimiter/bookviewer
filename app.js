@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v14';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v15';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -878,6 +878,7 @@ async function openBook(item, noPush) {
   R.wide = new Set(); R.gs = null; R.crops = new Map(); R.cropBase = undefined;
   closeMarks();
   $('library').hidden = true; reader.hidden = false; setUi(true);
+  $('title').classList.remove('open');
   $('title').textContent = item.parent && !item.single ? item.parent.title + '／' + item.title : item.title;
   $('searchBtn').hidden = item.kind !== 'pdf'; $('searchBtn').classList.remove('on');
   closeSearch(); $('searchInput').value = ''; $('searchList').innerHTML = ''; $('searchStatus').textContent = '';
@@ -928,6 +929,7 @@ window.addEventListener('popstate', () => {
   else if (SET.open) closeSet();
 });
 $('back').onclick = () => history.back();
+$('title').onclick = () => $('title').classList.toggle('open');  // 長い題名を全部見る
 
 $('dirBtn').onclick = () => { R.opt.dir = R.opt.dir === 'rtl' ? 'ltr' : 'rtl'; saveOpt(); updateBars(); };
 $('spreadBtn').onclick = () => {

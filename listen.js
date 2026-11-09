@@ -47,6 +47,7 @@
     history.pushState({ listen: 1 }, '');
     $('library').hidden = true; $('setView').hidden = true; view.hidden = false;
     document.body.classList.toggle('lsfull', !!settings.full);
+    $('lsTitle').classList.remove('open');
     $('lsTitle').textContent = (m.title || item.title) + (m.author ? '　' + m.author : '');
     $('lsPages').innerHTML = ''; $('lsLine').textContent = '';
     const ld = $('lsLoading'); ld.hidden = false;
@@ -328,6 +329,7 @@
   $('lsSeek').addEventListener('change', () => { seeking = false; seekTo((audio.duration || 0) * $('lsSeek').value / 1000); });
   $('lsTrack').onchange = () => { savePos(true); loadTrack(+$('lsTrack').value, 0); };
   $('lsBack').onclick = () => history.back();
+  $('lsTitle').onclick = () => $('lsTitle').classList.toggle('open');  // 長い題名を全部見る
   // 縦書きの本は、左が次のページ
   $('lsNavPrev').onclick = () => movePage(S.vertical ? 1 : -1);
   $('lsNavNext').onclick = () => movePage(S.vertical ? -1 : 1);
