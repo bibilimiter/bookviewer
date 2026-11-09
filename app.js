@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v19';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v20';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1428,6 +1428,26 @@ for (const el of [stage, $('lsStage')]) {
     lastTouchEnd = now;
   }, { passive: false });
   el.addEventListener('dblclick', (e) => e.preventDefault());
+}
+// iPad・iPhone（Safari・Brave など）：ブラウザの拡大を止める。拡大されてしまったら、もとの大きさにもどす
+// （ページの拡大はこのアプリが自分で行うので、ブラウザの拡大はいらない）
+if (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+  const vpm = document.querySelector('meta[name=viewport]');
+  const VP = 'width=device-width, initial-scale=1, viewport-fit=cover';
+  vpm.setAttribute('content', VP + ', maximum-scale=1');
+  if (window.visualViewport) {
+    let fixT = 0;
+    visualViewport.addEventListener('resize', () => {
+      if (visualViewport.scale <= 1.02) return;
+      clearTimeout(fixT);
+      fixT = setTimeout(() => {
+        if (visualViewport.scale <= 1.02) return;
+        // 設定を書きかえると、iPad のブラウザは拡大をもどす
+        vpm.setAttribute('content', VP + ', minimum-scale=1, maximum-scale=1');
+        setTimeout(() => { vpm.setAttribute('content', VP + ', maximum-scale=1'); window.scrollTo(0, 0); }, 300);
+      }, 400);
+    });
+  }
 }
 
 // ---------------- はじめに ----------------
