@@ -1,7 +1,7 @@
 // BookViewer のサービスワーカー：画面の部品と pdf.js をしまっておき、ネットがなくても開けるようにする
 // 日本語の PDF でよく使う文字の表（cmaps）も最初にしまう。ほかの表は、使ったときにしまう
 // 画面の部品を直したときは、VERSION の数を上げる（新しいものに入れかわる）
-const VERSION = 'bv-v20';
+const VERSION = 'bv-v21';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'listen.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png',
   'cmaps/UniJIS-UCS2-H.bcmap', 'cmaps/UniJIS-UCS2-V.bcmap', 'cmaps/UniJIS-UTF16-H.bcmap', 'cmaps/UniJIS-UTF16-V.bcmap', 'cmaps/Adobe-Japan1-UCS2.bcmap',
   'cmaps/90ms-RKSJ-H.bcmap', 'cmaps/90ms-RKSJ-V.bcmap',

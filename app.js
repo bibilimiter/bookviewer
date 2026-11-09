@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v20';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v21';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1419,16 +1419,24 @@ document.addEventListener('keydown', (e) => {
 });
 // iPad の Safari が画面全体を拡大しないように
 document.addEventListener('gesturestart', (e) => e.preventDefault());
-// iPad の Safari が、2回タップで画面を拡大しないように（ページの所と、聞く画面のページの所）
-let lastTouchEnd = 0;
+// iPad の Safari・Brave が、2回タップで画面を拡大しないように
+// ページをめくると、押した所（ページの絵）が入れかわって画面から外れ、指をはなした知らせが外へ届かない。
+// そこで、指を置いたときに見張り、すばやい2回目なら、置いたときと、はなしたとき（押した所に直接）の両方でブラウザの動きを止める
+let lastTouch = 0;
+const stopDouble = (e) => { if (e.cancelable) e.preventDefault(); };
 for (const el of [stage, $('lsStage')]) {
-  el.addEventListener('touchend', (e) => {
-    const now = Date.now();
-    if (now - lastTouchEnd < 350 && e.touches.length === 0) e.preventDefault();
-    lastTouchEnd = now;
+  el.addEventListener('touchstart', (e) => {
+    const now = Date.now(), quick = now - lastTouch < 400;
+    lastTouch = now;
+    if (e.touches.length > 1) return;  // 指2本（ピンチ）はそのまま
+    const t = e.target;
+    if (t && t.closest && t.closest('button, input, select, label, a')) return;  // ボタンはふつうに押せるように
+    if (t) t.addEventListener('touchend', (ev) => { if (Date.now() - lastTouch < 400 && quick) stopDouble(ev); }, { once: true, passive: false });
+    if (quick) stopDouble(e);
   }, { passive: false });
-  el.addEventListener('dblclick', (e) => e.preventDefault());
+  el.addEventListener('touchend', () => { lastTouch = Date.now(); }, { passive: true });
 }
+for (const el of [stage, $('lsStage')]) el.addEventListener('dblclick', (e) => e.preventDefault());
 // iPad・iPhone（Safari・Brave など）：ブラウザの拡大を止める。拡大されてしまったら、もとの大きさにもどす
 // （ページの拡大はこのアプリが自分で行うので、ブラウザの拡大はいらない）
 if (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
