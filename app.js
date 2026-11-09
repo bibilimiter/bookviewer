@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v15';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v16';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -767,9 +767,10 @@ function sizesFor(pgs) {
   return pgs.map((pg) => ({ w: (h * pg.w) / pg.h, h }));
 }
 
-async function show(s, keepZoom) {
+async function show(s, keepZoom, flip) {
   if (!R.src) return;
   s = startOf(s);
+  if (s === R.pos && R.view.length) flip = 0;
   const tok = ++R.token;
   R.pos = s; R.view = viewAt(s);
   updateBars();
@@ -789,9 +790,12 @@ async function show(s, keepZoom) {
       b.style.width = z.w + 'px'; b.style.height = z.h + 'px';
       st.width = z.fw + 'px'; st.height = z.fh + 'px'; st.left = z.x + 'px'; st.top = z.y + 'px';
     });
+    // めくる動き：入れかえる前の画面を写しておく
+    const old = flip && FLIP.on && R.z === 1 && pagesEl.children.length ? snapStage() : null;
     pagesEl.replaceChildren(...pgs.map(boxOf));
     updateMarkBtn();
     if (!keepZoom) resetZoom();
+    if (old) runFlip(old, flip > 0);
   } catch (e) {
     if (tok === R.token) toast('読めませんでした：' + errText(e), 4000);
   } finally {
@@ -804,6 +808,100 @@ async function show(s, keepZoom) {
   prepare(s + R.view.length, tok);
   if (s > 0) viewAt(startOf(s - 1)).forEach(getPage);
 }
+// ---------------- ページをめくる動き（紙が背を軸にして、くるっと回る） ----------------
+const FLIP = { on: loadJson('bv_flip', true) !== false, layer: null, anims: [] };
+const FLIP_MS = 380;
+// いま画面に出ているページを、1枚の絵に写す
+function snapStage() {
+  const sr = stage.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const c = document.createElement('canvas');
+  c.width = Math.round(sr.width * dpr); c.height = Math.round(sr.height * dpr);
+  const g = c.getContext('2d');
+  g.scale(dpr, dpr);
+  const boxes = [];
+  for (const b of pagesEl.children) {
+    const br = b.getBoundingClientRect(), el = b.firstElementChild;
+    boxes.push({ l: br.left - sr.left, t: br.top - sr.top, w: br.width, h: br.height });
+    if (!el) continue;
+    const er = el.getBoundingClientRect();
+    g.save(); g.beginPath(); g.rect(br.left - sr.left, br.top - sr.top, br.width, br.height); g.clip();
+    try { g.drawImage(el, er.left - sr.left, er.top - sr.top, er.width, er.height); } catch (e) { }
+    g.restore();
+  }
+  return { c, boxes, w: sr.width, h: sr.height };
+}
+function endFlip() {
+  FLIP.anims.forEach((a) => { try { a.cancel(); } catch (e) { } });
+  FLIP.anims = [];
+  if (FLIP.layer) { FLIP.layer.querySelectorAll('canvas').forEach((c) => { c.width = c.height = 0; }); FLIP.layer.remove(); FLIP.layer = null; }
+}
+// 写した絵の一部（left から width の幅）を切り出した紙
+function sheet(snap, left, width, origin) {
+  const d = document.createElement('div'); d.className = 'fsheet';
+  d.style.left = left + 'px'; d.style.width = width + 'px'; d.style.transformOrigin = origin;
+  const k = snap.c.width / snap.w, c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(width * k)); c.height = snap.c.height;
+  if (snap.c.width) c.getContext('2d').drawImage(snap.c, Math.round(left * k), 0, c.width, c.height, 0, 0, c.width, c.height);
+  c.style.width = width + 'px'; c.style.height = snap.h + 'px'; c.style.left = '0';
+  const sh = document.createElement('i'); sh.className = 'fshade';
+  d.append(c, sh);
+  return d;
+}
+function runFlip(old, forward) {
+  endFlip();
+  const neu = snapStage();
+  const rtl = R.opt.dir === 'rtl', W = old.w;
+  const layer = document.createElement('div'); layer.className = 'flip';
+  stage.append(layer); FLIP.layer = layer;
+  // めくる側（F）：進むとき、右開きは左のページ、左開きは右のページ
+  const fromLeft = forward === rtl;
+  const anim = (el, kf, delay) => { const a = el.animate(kf, { duration: FLIP_MS / 2, delay: delay || 0, easing: delay ? 'ease-out' : 'ease-in', fill: 'both' }); FLIP.anims.push(a); return a; };
+  const two = old.boxes.length > 1 || neu.boxes.length > 1;
+  let last;
+  if (two) {
+    // 見開き：背（2ページの境目）を軸に、F側の紙が回って、裏（新しいページ）がT側にかぶさる
+    const bx = (old.boxes.length > 1 ? old.boxes : neu.boxes).slice().sort((a, b) => a.l - b.l);
+    const spine = bx[0].l + bx[0].w;
+    const A = fromLeft ? sheet(old, 0, spine, 'right center') : sheet(old, spine, W - spine, 'left center');
+    const B = fromLeft ? sheet(old, spine, W - spine, 'left center') : sheet(old, 0, spine, 'right center');
+    const C = fromLeft ? sheet(neu, spine, W - spine, 'left center') : sheet(neu, 0, spine, 'right center');
+    const deg = fromLeft ? 90 : -90;
+    layer.append(B, C, A);
+    anim(A, [{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(' + deg + 'deg)' }]);
+    anim(A.lastChild, [{ opacity: 0 }, { opacity: 0.45 }]);
+    anim(B.lastChild, [{ opacity: 0 }, { opacity: 0.25 }]);
+    anim(C, [{ transform: 'rotateY(' + (-deg) + 'deg)' }, { transform: 'rotateY(0deg)' }], FLIP_MS / 2);
+    last = anim(C.lastChild, [{ opacity: 0.45 }, { opacity: 0 }], FLIP_MS / 2);
+  } else {
+    // 1ページ：とじている側（右開きは右はし）を軸に回る。進むときは今のページがめくれて去り、もどるときは前のページがかぶさってくる
+    const pb = old.boxes[0] || neu.boxes[0];
+    const spineRight = rtl;
+    const org = spineRight ? 'right center' : 'left center';
+    const deg = spineRight ? 90 : -90;
+    if (forward) {
+      const A = sheet(old, pb.l, pb.w, org);
+      layer.append(A);
+      anim(A, [{ transform: 'rotateY(0deg)', opacity: 1 }, { transform: 'rotateY(' + deg + 'deg)', opacity: 1 }]);
+      last = anim(A.lastChild, [{ opacity: 0 }, { opacity: 0.5 }]);
+    } else {
+      const B = sheet(old, 0, W, 'center'), nb = neu.boxes[0] || pb;
+      const C = sheet(neu, nb.l, nb.w, org);
+      layer.append(B, C);
+      anim(B.lastChild, [{ opacity: 0 }, { opacity: 0.3 }], FLIP_MS / 2);
+      anim(C, [{ transform: 'rotateY(' + deg + 'deg)' }, { transform: 'rotateY(0deg)' }], FLIP_MS / 2);
+      last = anim(C.lastChild, [{ opacity: 0.5 }, { opacity: 0 }], FLIP_MS / 2);
+    }
+  }
+  old.c.width = old.c.height = 0; neu.c.width = neu.c.height = 0;
+  last.onfinish = () => { if (FLIP.layer === layer) endFlip(); };
+}
+function updateFlipBtn() { $('flipBtn').classList.toggle('on', FLIP.on); }
+$('flipBtn').onclick = () => {
+  FLIP.on = !FLIP.on; saveJson('bv_flip', FLIP.on); updateFlipBtn();
+  toast(FLIP.on ? 'めくる動きをつけます' : 'めくる動きをやめます');
+};
+updateFlipBtn();
+
 async function prepare(s, tok) {
   if (s >= R.src.count) return;
   try {
@@ -817,7 +915,7 @@ async function prepare(s, tok) {
 }
 let nextVolAsk = 0;
 function next() {
-  if (R.pos + R.view.length < R.src.count) { show(R.pos + R.view.length); return; }
+  if (R.pos + R.view.length < R.src.count) { show(R.pos + R.view.length, false, 1); return; }
   const nv = nextVolume();
   if (!nv) { toast('最後のページです'); return; }
   // 最後のページで、もう一度めくると次の巻へ（うっかり進まないように）
@@ -832,13 +930,14 @@ function nextVolume() {
 }
 function releaseBook() {
   R.token++;
+  endFlip();
   for (const i of [...R.cache.keys()]) freePage(i);
   if (R.src) { try { R.src.close(); } catch (e) { } }
   R.src = null;
 }
 function switchVolume(v) { releaseBook(); openBook(v, true); }
 function prev() {
-  if (R.pos > 0) show(R.pos - 1);
+  if (R.pos > 0) show(R.pos - 1, false, -1);
   else toast('最初のページです');
 }
 // 画面の左右どちら側を押したか（右開きの本は、左が「次」）

@@ -153,3 +153,10 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 #lsMenu select { flex: 1; font-size: 15px; padding: 6px; background: #111827; color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
 #lsMenu input[type=range] { flex: 1; }
 #lsMenu .small { margin: -6px 0 0; }
+
+/* ページをめくる動き */
+.flip { position: absolute; inset: 0; z-index: 2; pointer-events: none; perspective: 1800px; overflow: hidden; }
+.fsheet { position: absolute; top: 0; bottom: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  transform-style: flat; will-change: transform; }
+.fsheet canvas { position: absolute; top: 0; }
+.fshade { position: absolute; inset: 0; background: #000; opacity: 0; }
