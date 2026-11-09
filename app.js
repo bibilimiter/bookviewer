@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v17';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v18';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1043,7 +1043,10 @@ $('cropBtn').onclick = () => {
 $('shiftBtn').onclick = () => { R.opt.shift = !R.opt.shift; saveOpt(); show(R.pos + (R.opt.shift ? 1 : 0)); };
 $('slider').addEventListener('input', () => { $('pageNo').textContent = $('slider').value + ' / ' + R.src.count; });
 $('slider').addEventListener('change', () => show(+$('slider').value - 1));
-if (document.documentElement.requestFullscreen) {
+// iPad・iPhone の Safari は、ページを画面いっぱいにするしくみが効かない（押しても何も起きない）のでボタンを出さない
+// （ホーム画面から開いたときは、はじめから画面いっぱい）
+const appleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (document.documentElement.requestFullscreen && !appleTouch) {
   $('fullBtn').hidden = false;
   $('fullBtn').onclick = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
