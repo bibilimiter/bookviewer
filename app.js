@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v18';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v19';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1419,6 +1419,16 @@ document.addEventListener('keydown', (e) => {
 });
 // iPad の Safari が画面全体を拡大しないように
 document.addEventListener('gesturestart', (e) => e.preventDefault());
+// iPad の Safari が、2回タップで画面を拡大しないように（ページの所と、聞く画面のページの所）
+let lastTouchEnd = 0;
+for (const el of [stage, $('lsStage')]) {
+  el.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd < 350 && e.touches.length === 0) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive: false });
+  el.addEventListener('dblclick', (e) => e.preventDefault());
+}
 
 // ---------------- はじめに ----------------
 // 新しい版が届いたら入れかえる（読んでいる最中なら、本棚にもどったときに）
