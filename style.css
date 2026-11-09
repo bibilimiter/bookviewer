@@ -9,6 +9,8 @@ html, body { margin: 0; height: 100%; overscroll-behavior: none; background: var
 body { -webkit-text-size-adjust: 100%;
   /* 字を押しても選ばれないように（Android の「タップして検索」が出ないように）。文字を打つ欄だけは選べる */
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+/* ブラウザが2回タップで画面を拡大しないように（指2本での拡大はできる） */
+html, body { touch-action: manipulation; }
 input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
 [hidden] { display: none !important; }
 .view { min-height: 100%; }
