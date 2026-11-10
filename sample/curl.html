@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>めくり見本</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111827; color: #f3f4f6; overflow: hidden;
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
+  #bar { position: fixed; left: 0; right: 0; top: 0; display: flex; gap: 8px; align-items: center; padding: max(8px, env(safe-area-inset-top)) 12px 8px;
+    background: rgba(31,41,55,.92); z-index: 2; font-size: 14px; flex-wrap: wrap; }
+  #bar b { flex: 1; min-width: 120px; }
+  button { font: inherit; background: #374151; color: #f3f4f6; border: 1px solid #4b5563; border-radius: 8px; padding: 6px 10px; }
+  button.on { background: #3b82f6; border-color: #3b82f6; }
+  #cv { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; display: block; }
+  #hint { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); background: rgba(0,0,0,.65);
+    padding: 6px 12px; border-radius: 10px; font-size: 13px; white-space: nowrap; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="bar"><b>めくり見本</b><button id="dir" class="on">右開き</button><button id="two">見開き</button></div>
+<div id="hint">ページのはしを指でつまんで引っぱる／はしをタップ</div>
+<script>
+'use strict';
+// 指についてくる「紙が曲がってめくれる」見本（BookViewer に入れる前の試し）
+const cv = document.getElementById('cv'), g = cv.getContext('2d');
+const N = 12;
+let rtl = true, two = false, cur = 0;   // cur：見えているページ（見開きなら左右の組の最初）
+let W = 0, H = 0, dpr = 1, pageRect = null;
+const pages = [];
+// 見本のページ（縦書き風の文字と、ページ番号）
+function makePage(i, w, h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.fillStyle = i % 2 ? '#f7f2e6' : '#f5efe0'; x.fillRect(0, 0, w, h);
+  x.fillStyle = '#2b2b2b'; const fs = Math.max(10, Math.round(w / 22));
+  x.font = fs + 'px "Hiragino Mincho ProN", "Yu Mincho", serif';
+  const text = 'これはページをめくる動きの見本です。指でページのはしをつまんで、ゆっくり引っぱってみてください。紙が曲がって、裏が見えます。とちゅうで指をはなすと、もとにもどるか、めくれます。';
+  let col = 0, k = (i * 7) % text.length;
+  for (let xx = w - fs * 2.2; xx > fs * 1.2; xx -= fs * 1.7, col++) {
+    for (let yy = fs * 3; yy < h - fs * 3; yy += fs * 1.1) { x.fillText(text[k % text.length], xx, yy); k++; }
+  }
+  x.font = 'bold ' + Math.round(fs * 1.6) + 'px system-ui'; x.fillStyle = '#b45309';
+  x.fillText(String(i + 1), w / 2 - fs * 0.6, h - fs * 1.2);
+  return c;
+}
+function layout() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const top = 56, avH = H - top - 10, ratio = 0.7;
+  let ph = avH, pw = ph * ratio;
+  const cols = two ? 2 : 1;
+  if (pw * cols > W - 16) { pw = (W - 16) / cols; ph = pw / ratio; }
+  pageRect = { x: (W - pw * cols) / 2, y: top + (avH - ph) / 2, w: pw, h: ph };
+  pages.length = 0;
+  for (let i = 0; i < N; i++) pages.push(makePage(i, Math.round(pw * dpr), Math.round(ph * dpr)));
+  if (two) cur -= cur % 2;
+  draw();
+}
+// 見開きの左右どちらに、何ページ目を置くか（右開きは右が若いページ）
+function slots(start) {
+  if (!two) return [{ i: start, x: pageRect.x }];
+  const a = start, b = start + 1;
+  const L = pageRect.x, R = pageRect.x + pageRect.w;
+  return rtl ? [{ i: a, x: R }, { i: b, x: L }] : [{ i: a, x: L }, { i: b, x: R }];
+}
+function drawPage(i, x) {
+  if (i < 0 || i >= N) { g.fillStyle = '#1f2937'; g.fillRect(x, pageRect.y, pageRect.w, pageRect.h); return; }
+  g.drawImage(pages[i], x, pageRect.y, pageRect.w, pageRect.h);
+}
+const step = () => (two ? 2 : 1);
+
+// ---- めくり（いま動いている紙） ----
+// turn = { fwd, sx: 動く紙の左はし, side: 'L'|'R'（つまんだはし）, cy: つまんだ角の高さ, f: 指の位置, front, back(裏に来るページ) }
+let turn = null, anim = 0;
+function startTurn(fwd, cornerY) {
+  const n = cur + (fwd ? step() : -step());
+  if (n < 0 || n >= N) return null;
+  // 進むとき、右開きは左のはしを引く。もどるときは右のはし
+  const side = (fwd === rtl) ? 'L' : 'R';
+  let sx;
+  if (two) sx = side === 'L' ? pageRect.x : pageRect.x + pageRect.w;
+  else sx = pageRect.x;
+  const cy = cornerY < pageRect.y + pageRect.h / 2 ? pageRect.y : pageRect.y + pageRect.h;
+  // 動く紙のおもて・うら・下に見えるページ
+  let front, back, under;
+  if (!two) { front = cur; back = -1; under = n; }
+  else {
+    const now = slots(cur), nxt = slots(n);
+    const pick = (arr) => arr.find((s) => (side === 'L' ? s.x === pageRect.x : s.x !== pageRect.x)).i;
+    const pickOther = (arr) => arr.find((s) => (side === 'L' ? s.x !== pageRect.x : s.x === pageRect.x)).i;
+    front = pick(now); under = pick(nxt); back = pickOther(nxt);
+  }
+  const cx = side === 'L' ? sx : sx + pageRect.w;
+  return { fwd, side, sx, cx, cy, f: { x: cx, y: cy }, front, back, under, n };
+}
+// 半分の面で多角形を切る（n の向きの側を残す）
+function clipPoly(poly, m, n, keepPositive) {
+  const out = [], s = keepPositive ? 1 : -1;
+  for (let k = 0; k < poly.length; k++) {
+    const a = poly[k], b = poly[(k + 1) % poly.length];
+    const da = s * ((a.x - m.x) * n.x + (a.y - m.y) * n.y), db = s * ((b.x - m.x) * n.x + (b.y - m.y) * n.y);
+    if (da >= 0) out.push(a);
+    if ((da >= 0) !== (db >= 0)) { const t = da / (da - db); out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); }
+  }
+  return out;
+}
+const pathOf = (poly) => { g.beginPath(); poly.forEach((p, k) => (k ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y))); g.closePath(); };
+function draw() {
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#111827'; g.fillRect(0, 0, W, H);
+  const base = slots(cur);
+  if (!turn) { base.forEach((s) => drawPage(s.i, s.x)); if (two) spine(); return; }
+  const t = turn, pr = { x: t.sx, y: pageRect.y, w: pageRect.w, h: pageRect.h };
+  // 動かない側のページ
+  base.forEach((s) => { if (s.i !== t.front) drawPage(s.i, s.x); });
+  // 動く紙の下に見えるページ
+  drawPage(t.under, t.sx);
+  const C = { x: t.cx, y: t.cy }, F = t.f;
+  const dx = F.x - C.x, dy = F.y - C.y, len = Math.hypot(dx, dy);
+  if (len < 0.5) { drawPage(t.front, t.sx); if (two) spine(); return; }
+  const n = { x: dx / len, y: dy / len }, M = { x: (C.x + F.x) / 2, y: (C.y + F.y) / 2 };
+  const rect = [{ x: pr.x, y: pr.y }, { x: pr.x + pr.w, y: pr.y }, { x: pr.x + pr.w, y: pr.y + pr.h }, { x: pr.x, y: pr.y + pr.h }];
+  const stay = clipPoly(rect, M, n, true), fold = clipPoly(rect, M, n, false);
+  // 折れ目の近くの、下のページに落ちる影
+  g.save(); pathOf(fold); g.clip();
+  const sh = g.createLinearGradient(M.x, M.y, M.x - n.x * 40, M.y - n.y * 40);
+  sh.addColorStop(0, 'rgba(0,0,0,0.35)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = sh; g.fillRect(pr.x, pr.y, pr.w, pr.h); g.restore();
+  // 残っている、おもての部分
+  if (stay.length > 2) {
+    g.save(); pathOf(stay); g.clip();
+    g.drawImage(t.front >= 0 && t.front < N ? pages[t.front] : pages[0], pr.x, pr.y, pr.w, pr.h);
+    const s2 = g.createLinearGradient(M.x, M.y, M.x + n.x * 30, M.y + n.y * 30);
+    s2.addColorStop(0, 'rgba(0,0,0,0.18)'); s2.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = s2; g.fillRect(pr.x, pr.y, pr.w, pr.h);
+    g.restore();
+  }
+  // 折り返した裏の部分（折れ目で鏡に映した形）
+  if (fold.length > 2) {
+    const ref = (p) => { const d = (p.x - M.x) * n.x + (p.y - M.y) * n.y; return { x: p.x - 2 * d * n.x, y: p.y - 2 * d * n.y }; };
+    const flap = fold.map(ref);
+    g.save();
+    g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 18;
+    pathOf(flap); g.fillStyle = '#ece6d6'; g.fill();
+    g.shadowColor = 'transparent';
+    pathOf(flap); g.clip();
+    // 見開きのときは、裏は次のページ。1ページのときは、紙の裏（うすく文字がすける）
+    g.translate(M.x, M.y);
+    const ang = Math.atan2(n.y, n.x);
+    g.rotate(ang); g.scale(-1, 1); g.rotate(-ang);
+    g.translate(-M.x, -M.y);
+    if (t.back >= 0 && t.back < N) {
+      // 裏のページは、まっすぐに読めるよう、もう一度鏡に映して置く
+      g.save(); g.translate(pr.x + pr.w / 2, 0); g.scale(-1, 1); g.translate(-(pr.x + pr.w / 2), 0);
+      g.drawImage(pages[t.back], pr.x, pr.y, pr.w, pr.h); g.restore();
+    } else { g.globalAlpha = 0.12; g.drawImage(pages[t.front], pr.x, pr.y, pr.w, pr.h); g.globalAlpha = 1; }
+    g.restore();
+    // 裏の折れ目のあたりを明るく、はしを少し暗く（紙のまるみ）
+    g.save(); pathOf(flap); g.clip();
+    const s3 = g.createLinearGradient(M.x, M.y, M.x - n.x * len * 0.5, M.y - n.y * len * 0.5);
+    s3.addColorStop(0, 'rgba(255,255,255,0.35)'); s3.addColorStop(0.5, 'rgba(255,255,255,0)'); s3.addColorStop(1, 'rgba(0,0,0,0.12)');
+    g.fillStyle = s3; g.fillRect(0, 0, W, H); g.restore();
+  }
+  if (two) spine();
+}
+function spine() {
+  const x = pageRect.x + pageRect.w;
+  const s = g.createLinearGradient(x - 14, 0, x + 14, 0);
+  s.addColorStop(0, 'rgba(0,0,0,0)'); s.addColorStop(0.5, 'rgba(0,0,0,0.25)'); s.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = s; g.fillRect(x - 14, pageRect.y, 28, pageRect.h);
+}
+// 指の位置を、紙が破れない範囲におさめる（背の角からの長さはページの幅まで）
+function setFinger(x, y) {
+  const t = turn;
+  const spX = t.side === 'L' ? t.sx + pageRect.w : t.sx;
+  const S = { x: spX, y: t.cy };
+  let dx = x - S.x, dy = y - S.y; const d = Math.hypot(dx, dy), max = pageRect.w;
+  if (d > max) { x = S.x + dx * max / d; y = S.y + dy * max / d; }
+  // 反対の角もはみ出さないように
+  const S2 = { x: spX, y: t.cy === pageRect.y ? pageRect.y + pageRect.h : pageRect.y };
+  dx = x - S2.x; dy = y - S2.y; const d2 = Math.hypot(dx, dy), max2 = Math.hypot(pageRect.w, pageRect.h);
+  if (d2 > max2) { x = S2.x + dx * max2 / d2; y = S2.y + dy * max2 / d2; }
+  t.f = { x, y };
+}
+// 指をはなしたあと：めくり終える／もどる
+function finish(done, speed) {
+  const t = turn; if (!t) return;
+  cancelAnimationFrame(anim);
+  const from = { ...t.f };
+  const end = done ? { x: t.side === 'L' ? t.cx + 2 * pageRect.w : t.cx - 2 * pageRect.w, y: t.cy } : { x: t.cx, y: t.cy };
+  const ms = speed || 380, t0 = performance.now();
+  const ease = (u) => 1 - Math.pow(1 - u, 3);
+  const tick = (now) => {
+    const u = Math.min(1, (now - t0) / ms), e = ease(u);
+    // まん中で少し持ち上がるように
+    const lift = done ? Math.sin(Math.PI * e) * pageRect.h * 0.06 * (t.cy === pageRect.y ? 1 : -1) : 0;
+    setFingerFree(from.x + (end.x - from.x) * e, from.y + (end.y - from.y) * e + lift);
+    draw();
+    if (u < 1) anim = requestAnimationFrame(tick);
+    else { if (done) cur = t.n; turn = null; draw(); }
+  };
+  anim = requestAnimationFrame(tick);
+}
+function setFingerFree(x, y) { turn.f = { x, y }; }
+
+// ---- 指の操作 ----
+let drag = null;
+cv.addEventListener('pointerdown', (e) => {
+  if (turn) return;
+  const x = e.clientX, y = e.clientY;
+  if (y < pageRect.y - 20 || y > pageRect.y + pageRect.h + 20) return;
+  const left = pageRect.x, right = pageRect.x + pageRect.w * (two ? 2 : 1), edge = Math.max(40, pageRect.w * 0.3);
+  let side = null;
+  if (x < left + edge) side = 'L'; else if (x > right - edge) side = 'R'; else return;
+  const fwd = (side === 'L') === rtl;
+  const tt = startTurn(fwd, y);
+  if (!tt) return;
+  turn = tt;
+  drag = { id: e.pointerId, x0: x, y0: y, t0: performance.now(), moved: false, lastX: x, lastT: performance.now(), vx: 0 };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const x = e.clientX, y = e.clientY;
+  if (Math.hypot(x - drag.x0, y - drag.y0) > 6) drag.moved = true;
+  const now = performance.now(); drag.vx = (x - drag.lastX) / Math.max(1, now - drag.lastT); drag.lastX = x; drag.lastT = now;
+  if (drag.moved) { setFinger(x, y); draw(); }
+});
+const up = (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const t = turn, d = drag; drag = null;
+  if (!d.moved) { finish(true, 520); return; }   // タップ：自動でめくる
+  const dir = t.side === 'L' ? 1 : -1;
+  const moved = (t.f.x - t.cx) * dir;
+  finish(moved > pageRect.w * 0.35 || d.vx * dir > 0.5);
+};
+cv.addEventListener('pointerup', up);
+cv.addEventListener('pointercancel', up);
+document.getElementById('dir').onclick = (e) => { rtl = !rtl; e.target.textContent = rtl ? '右開き' : '左開き'; draw(); };
+document.getElementById('two').onclick = (e) => { two = !two; e.target.classList.toggle('on', two); layout(); };
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+addEventListener('resize', () => { turn = null; layout(); });
+layout();
+</script>
+</body>
+</html>
