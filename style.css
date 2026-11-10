@@ -162,3 +162,8 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
   transform-style: flat; will-change: transform; }
 .fsheet canvas { position: absolute; top: 0; }
 .fshade { position: absolute; inset: 0; background: #000; opacity: 0; }
+
+/* 画面いっぱいのときの時計 */
+.clock { position: fixed; top: max(6px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); z-index: 9;
+  background: rgba(0,0,0,.55); color: #f3f4f6; font-size: 14px; padding: 2px 9px; border-radius: 10px; pointer-events: none;
+  font-variant-numeric: tabular-nums; }

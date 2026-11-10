@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v21';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v22';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1046,13 +1046,23 @@ $('slider').addEventListener('change', () => show(+$('slider').value - 1));
 // iPad・iPhone の Safari は、ページを画面いっぱいにするしくみが効かない（押しても何も起きない）のでボタンを出さない
 // （ホーム画面から開いたときは、はじめから画面いっぱい）
 const appleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-if (document.documentElement.requestFullscreen && !appleTouch) {
-  $('fullBtn').hidden = false;
-  $('fullBtn').onclick = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
-    else document.documentElement.requestFullscreen().catch(() => { });
-  };
+const canFull = !!document.documentElement.requestFullscreen && !appleTouch;
+function toggleFull() {
+  if (!canFull) return;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
+  else document.documentElement.requestFullscreen().catch(() => { });
 }
+if (canFull) { $('fullBtn').hidden = false; $('fullBtn').onclick = toggleFull; }
+// 画面いっぱいのときは、右上に今の時刻を出す（スマホの時計が見えなくなるので）
+function updateClock() {
+  const on = !!document.fullscreenElement && (R.open || (window.LISTEN && LISTEN.isOpen()));
+  const c = $('clock'); c.hidden = !on;
+  if (!on) return;
+  const d = new Date();
+  c.textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+document.addEventListener('fullscreenchange', updateClock);
+setInterval(updateClock, 10000);
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
@@ -1378,9 +1388,15 @@ function onTap(x, y) {
   // 2回すばやく押しての拡大はしない（表示が乱れることがあるため）。拡大は指2本で広げる
   const W = stage.clientWidth;
   const zone = x < W * 0.3 ? 'left' : x > W * 0.7 ? 'right' : 'center';
-  if (R.z > 1) { if (zone === 'center') toggleUi(); else resetZoom(); return; }  // 拡大中：はしを押すともとの大きさにもどる
-  if (zone !== 'center') { turn(zone); return; }
-  toggleUi();
+  if (R.z > 1 && zone !== 'center') { resetZoom(); return; }  // 拡大中：はしを押すともとの大きさにもどる
+  if (zone !== 'center') { lastTap = null; turn(zone); return; }
+  // まん中：1回で上下のボタンを出す／しまう。2回すばやく押すと画面いっぱいの切りかえ（できる端末だけ）
+  if (!canFull) { toggleUi(); return; }
+  const now = Date.now();
+  clearTimeout(tapTimer);
+  if (lastTap && now - lastTap.t < 320) { lastTap = null; toggleFull(); return; }
+  lastTap = { t: now };
+  tapTimer = setTimeout(() => { lastTap = null; toggleUi(); }, 320);
 }
 
 // マウスのホイール：回すとページをめくる。Ctrl を押しながらで拡大
