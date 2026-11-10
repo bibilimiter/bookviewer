@@ -169,3 +169,6 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
   font-variant-numeric: tabular-nums; }
 /* 上下のボタンを出しているあいだは、時計を隠す（ボタンと重ならないように） */
 #reader:not([hidden]):not(.hideui) ~ .clock, body:not(.lsfull) #listen:not([hidden]) ~ .clock { display: none; }
+
+/* 指でつまんでめくるときの絵 */
+.curl { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }

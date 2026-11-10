@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v23';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v24';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -795,7 +795,7 @@ async function show(s, keepZoom, flip) {
     pagesEl.replaceChildren(...pgs.map(boxOf));
     updateMarkBtn();
     if (!keepZoom) resetZoom();
-    if (old) runFlip(old, flip > 0);
+    if (old) curlAuto(old, flip > 0);
   } catch (e) {
     if (tok === R.token) toast('読めませんでした：' + errText(e), 4000);
   } finally {
@@ -831,6 +831,7 @@ function snapStage() {
   return { c, boxes, w: sr.width, h: sr.height };
 }
 function endFlip() {
+  curlEnd();
   FLIP.anims.forEach((a) => { try { a.cancel(); } catch (e) { } });
   FLIP.anims = [];
   if (FLIP.layer) { FLIP.layer.querySelectorAll('canvas').forEach((c) => { c.width = c.height = 0; }); FLIP.layer.remove(); FLIP.layer = null; }
@@ -895,6 +896,172 @@ function runFlip(old, forward) {
   old.c.width = old.c.height = 0; neu.c.width = neu.c.height = 0;
   last.onfinish = () => { if (FLIP.layer === layer) endFlip(); };
 }
+// ---------------- 指でつまんでめくる（紙が曲がって、裏が見える） ----------------
+// A：めくる前の画面の絵、B：めくった後の画面の絵。「進む」は A→B の紙をめくる。「もどる」は前のページ（A）を、めくった状態から元へもどす
+const CURL = { cv: null, s: null, raf: 0 };
+function curlEnd() {
+  cancelAnimationFrame(CURL.raf);
+  if (CURL.cv) { CURL.cv.width = CURL.cv.height = 0; CURL.cv.remove(); CURL.cv = null; }
+  if (CURL.s) { for (const k of ['A', 'B']) if (CURL.s[k]) CURL.s[k].c.width = CURL.s[k].c.height = 0; }
+  CURL.s = null;
+}
+function curlCanvas() {
+  if (CURL.cv) return CURL.cv;
+  const c = document.createElement('canvas'); c.className = 'curl';
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = Math.round(stage.clientWidth * dpr); c.height = Math.round(stage.clientHeight * dpr);
+  stage.append(c); CURL.cv = c;
+  return c;
+}
+// めくる紙の場所（A の絵の中で、めくる側のページ）と、背（折り目の軸）を決める
+function curlGeom(s, cornerY) {
+  const side = R.opt.dir === 'rtl' ? 'L' : 'R';  // 進むとき、右開きは左のページをめくる
+  const bx = (s.A.boxes.length ? s.A.boxes : s.B.boxes).slice().sort((a, b) => a.l - b.l);
+  const sheet = side === 'L' ? bx[0] : bx[bx.length - 1];
+  const two = s.A.boxes.length > 1 || s.B.boxes.length > 1;
+  // 見開きは2ページの境目、1ページはとじている側のはしが背
+  const spine = side === 'L' ? sheet.l + sheet.w : sheet.l;
+  const cx = side === 'L' ? sheet.l : sheet.l + sheet.w;
+  const cy = cornerY != null && cornerY < sheet.t + sheet.h / 2 ? sheet.t : sheet.t + sheet.h;
+  Object.assign(s, { side, sheet, two, spine, C: { x: cx, y: cy }, E: { x: 2 * spine - cx, y: cy } });
+  if (!s.F) s.F = s.fwd ? { ...s.C } : { ...s.E };
+}
+function curlClip(poly, m, n, keep) {
+  const out = [];
+  for (let k = 0; k < poly.length; k++) {
+    const a = poly[k], b = poly[(k + 1) % poly.length];
+    const da = keep * ((a.x - m.x) * n.x + (a.y - m.y) * n.y), db = keep * ((b.x - m.x) * n.x + (b.y - m.y) * n.y);
+    if (da >= 0) out.push(a);
+    if ((da >= 0) !== (db >= 0)) { const t = da / (da - db); out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); }
+  }
+  return out;
+}
+// 紙が破れない範囲に、角の位置をおさめる（背の角からの長さは、ページの幅まで）
+function curlLimit(s, x, y) {
+  const sh = s.sheet;
+  for (const sy of [s.C.y, s.C.y === sh.t ? sh.t + sh.h : sh.t]) {
+    const max = sy === s.C.y ? sh.w : Math.hypot(sh.w, sh.h);
+    const dx = x - s.spine, dy = y - sy, d = Math.hypot(dx, dy);
+    if (d > max) { x = s.spine + dx * max / d; y = sy + dy * max / d; }
+  }
+  return { x, y };
+}
+function curlDraw() {
+  const s = CURL.s, c = CURL.cv; if (!s || !c) return;
+  const g = c.getContext('2d'), W = stage.clientWidth, H = stage.clientHeight, k = c.width / W;
+  g.setTransform(k, 0, 0, k, 0, 0);
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  if (!s.B) { g.drawImage(s.A.c, 0, 0, W, H); return; }  // めくった後の絵がまだできていない
+  const sh = s.sheet, path = (pl) => { g.beginPath(); pl.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.closePath(); };
+  // 下：めくった後の画面
+  g.drawImage(s.B.c, 0, 0, W, H);
+  // 見開き：めくらない側は、紙がかぶさるまで前の画面のまま
+  if (s.two) {
+    g.save(); g.beginPath();
+    if (s.side === 'L') g.rect(s.spine, 0, W - s.spine, H); else g.rect(0, 0, s.spine, H);
+    g.clip(); g.drawImage(s.A.c, 0, 0, W, H); g.restore();
+  }
+  const C = s.C, F = s.F, dx = F.x - C.x, dy = F.y - C.y, len = Math.hypot(dx, dy);
+  const rect = [{ x: sh.l, y: sh.t }, { x: sh.l + sh.w, y: sh.t }, { x: sh.l + sh.w, y: sh.t + sh.h }, { x: sh.l, y: sh.t + sh.h }];
+  if (len < 0.5) { g.save(); path(rect); g.clip(); g.drawImage(s.A.c, 0, 0, W, H); g.restore(); return; }
+  const n = { x: dx / len, y: dy / len }, M = { x: (C.x + F.x) / 2, y: (C.y + F.y) / 2 };
+  const stay = curlClip(rect, M, n, 1), fold = curlClip(rect, M, n, -1);
+  // 折れ目の近くの影（下のページに落ちる）
+  if (fold.length > 2) {
+    g.save(); path(fold); g.clip();
+    const gr = g.createLinearGradient(M.x, M.y, M.x - n.x * 40, M.y - n.y * 40);
+    gr.addColorStop(0, 'rgba(0,0,0,0.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H); g.restore();
+  }
+  // めくっている紙の、まだおもての部分
+  if (stay.length > 2) {
+    g.save(); path(stay); g.clip(); g.drawImage(s.A.c, 0, 0, W, H);
+    const gr = g.createLinearGradient(M.x, M.y, M.x + n.x * 30, M.y + n.y * 30);
+    gr.addColorStop(0, 'rgba(0,0,0,0.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H); g.restore();
+  }
+  // 折り返した裏（折れ目で鏡に映した形）
+  if (fold.length > 2) {
+    const ref = (q) => { const d = (q.x - M.x) * n.x + (q.y - M.y) * n.y; return { x: q.x - 2 * d * n.x, y: q.y - 2 * d * n.y }; };
+    const flap = fold.map(ref);
+    g.save(); g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 18; path(flap); g.fillStyle = '#ece8df'; g.fill(); g.restore();
+    g.save(); path(flap); g.clip();
+    const a = Math.atan2(n.y, n.x);
+    g.translate(M.x, M.y); g.rotate(a); g.scale(-1, 1); g.rotate(-a); g.translate(-M.x, -M.y);
+    if (s.two) { g.translate(2 * s.spine, 0); g.scale(-1, 1); g.drawImage(s.B.c, 0, 0, W, H); }  // 裏は、めくった後の反対側のページ
+    else { g.globalAlpha = 0.12; g.drawImage(s.A.c, 0, 0, W, H); g.globalAlpha = 1; }  // 1ページ：紙の裏に、うすく字がすける
+    g.restore();
+    g.save(); path(flap); g.clip();
+    const gr = g.createLinearGradient(M.x, M.y, M.x - n.x * len * 0.5, M.y - n.y * len * 0.5);
+    gr.addColorStop(0, 'rgba(255,255,255,0.3)'); gr.addColorStop(0.5, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.12)');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H); g.restore();
+  }
+}
+// 角を to まで動かす。終わったら done()
+function curlAnimate(to, ms, done) {
+  const s = CURL.s; if (!s) return;
+  cancelAnimationFrame(CURL.raf);
+  const from = { ...s.F }, t0 = performance.now(), ease = (u) => 1 - Math.pow(1 - u, 3);
+  const lift = (to.x === s.E.x && from.x !== to.x) ? (s.C.y === s.sheet.t ? 1 : -1) * s.sheet.h * 0.06 : 0;
+  const tick = (now) => {
+    if (CURL.s !== s) return;
+    const u = Math.min(1, (now - t0) / ms), e = ease(u);
+    s.F = { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e + Math.sin(Math.PI * e) * lift };
+    curlDraw();
+    if (u < 1) CURL.raf = requestAnimationFrame(tick); else if (done) done();
+  };
+  CURL.raf = requestAnimationFrame(tick);
+}
+// タップ・キーでめくったとき：old は入れかえる前の画面の絵（いまは新しいページが出ている）
+function curlAuto(old, forward) {
+  endFlip();
+  const neu = snapStage();
+  const s = { fwd: forward, A: forward ? old : neu, B: forward ? neu : old };
+  CURL.s = s; curlCanvas(); curlGeom(s, null);
+  curlDraw();
+  curlAnimate(forward ? s.E : s.C, 520, () => { if (CURL.s === s) curlEnd(); });
+}
+// 指でつまんで動かし始めたとき
+async function curlDragStart(gs, fwd) {
+  endFlip();
+  const from = R.pos, target = fwd ? R.pos + R.view.length : startOf(R.pos - 1);
+  const old = snapStage();
+  const s = { fwd, from, target, A: fwd ? old : null, B: fwd ? null : old, F: null, ready: false, release: null };
+  CURL.s = s; gs.curl = s; curlCanvas();
+  // まだ準備中は、前の画面をそのまま出しておく
+  const g = CURL.cv.getContext('2d'), k = CURL.cv.width / stage.clientWidth;
+  g.setTransform(k, 0, 0, k, 0, 0); g.drawImage(old.c, 0, 0, stage.clientWidth, stage.clientHeight);
+  await show(target, false, 0);
+  if (CURL.s !== s) return;
+  if (R.pos !== startOf(target)) { curlEnd(); return; }
+  const neu = snapStage();
+  if (fwd) s.B = neu; else s.A = neu;
+  curlGeom(s, gs.y0);
+  s.ready = true;
+  if (s.release) curlRelease(s, s.release.done); else { curlMove(s, gs.lastX - gs.x0, gs.lastY - gs.y0); }
+}
+function curlMove(s, dx, dy) {
+  if (!s.ready) return;
+  const st = s.fwd ? s.C : s.E;
+  const k = s.two ? 1.5 : 2.2;  // 1ページは、めくる紙が画面いっぱいなので大きめに動かす
+  s.F = curlLimit(s, st.x + dx * k, st.y + dy * 0.5);
+  curlDraw();
+}
+function curlRelease(s, done) {
+  if (!s.ready) { s.release = { done }; return; }
+  if (done) curlAnimate(s.fwd ? s.E : s.C, 300, () => { if (CURL.s === s) curlEnd(); });
+  else curlAnimate(s.fwd ? s.C : s.E, 260, async () => {
+    if (CURL.s !== s) return;
+    await show(s.from, false, 0);  // もとのページにもどす（絵がかぶさっている間に）
+    if (CURL.s === s) curlEnd();
+  });
+}
+// どこまで動かしたか（0：めくる前〜1：めくり終わり）
+function curlProgress(s) {
+  if (!s.ready) return s.fwd ? 0 : 1;
+  return Math.max(0, Math.min(1, (s.F.x - s.C.x) / (s.E.x - s.C.x || 1)));
+}
+
 function updateFlipBtn() { $('flipBtn').classList.toggle('on', FLIP.on); }
 $('flipBtn').onclick = () => {
   FLIP.on = !FLIP.on; saveJson('bv_flip', FLIP.on); updateFlipBtn();
@@ -1355,7 +1522,17 @@ stage.addEventListener('pointermove', (e) => {
   } else if (gest.type === 'one') {
     const p = rel(e), dx = p.x - gest.x0, dy = p.y - gest.y0;
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) gest.moved = true;
-    if (R.z > 1) { R.tx = gest.tx0 + dx; R.ty = gest.ty0 + dy; clampPan(); applyZoom(); }
+    if (R.z > 1) { R.tx = gest.tx0 + dx; R.ty = gest.ty0 + dy; clampPan(); applyZoom(); return; }
+    // 横に動かしたら、指でつまんでめくる
+    const now = performance.now();
+    gest.vx = (p.x - (gest.lastX ?? gest.x0)) / Math.max(1, now - (gest.lastT || now - 16));
+    gest.lastX = p.x; gest.lastY = p.y; gest.lastT = now;
+    if (gest.curl) { curlMove(gest.curl, dx, dy); return; }
+    if (FLIP.on && R.src && !gest.noCurl && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 0.7) {
+      const fwd = R.opt.dir === 'rtl' ? dx > 0 : dx < 0;
+      const ok = fwd ? R.pos + R.view.length < R.src.count : R.pos > 0;
+      if (ok) curlDragStart(gest, fwd); else gest.noCurl = true;
+    }
   }
 });
 function endPointer(e, cancelled) {
@@ -1375,8 +1552,17 @@ function endPointer(e, cancelled) {
   }
   if (ptrs.size > 0) return;
   const g = gest; gest = null;
-  if (cancelled) return;
   const dx = p.x - g.x0, dy = p.y - g.y0, dt = Date.now() - g.t0;
+  if (g.curl) {  // 指でつまんでめくっていた：半分より先か、勢いよくはらったら、めくり終える
+    const s = g.curl;
+    if (cancelled) { curlRelease(s, false); return; }
+    const pr = curlProgress(s), v = (performance.now() - (g.lastT || 0) < 120 ? g.vx || 0 : 0) * (s.side === 'L' ? 1 : -1);
+    const done = s.fwd ? (pr > 0.35 || v > 0.5 || (!s.ready && Math.abs(dx) > 50)) : (pr < 0.65 || v < -0.5 || (!s.ready && Math.abs(dx) > 50));
+    curlRelease(s, done);
+    if (done) setUi(false);
+    return;
+  }
+  if (cancelled) return;
   if (!g.moved && dt < 500) { onTap(p.x, p.y); return; }
   if (R.z === 1 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.2) turn(dx > 0 ? 'left' : 'right');
 }
