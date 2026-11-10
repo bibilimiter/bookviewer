@@ -167,3 +167,5 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 .clock { position: fixed; top: max(6px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); z-index: 9;
   background: rgba(0,0,0,.55); color: #f3f4f6; font-size: 14px; padding: 2px 9px; border-radius: 10px; pointer-events: none;
   font-variant-numeric: tabular-nums; }
+/* 上下のボタンを出しているあいだは、時計を隠す（ボタンと重ならないように） */
+#reader:not([hidden]):not(.hideui) ~ .clock, body:not(.lsfull) #listen:not([hidden]) ~ .clock { display: none; }
