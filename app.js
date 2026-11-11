@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v25';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v26';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -37,12 +37,40 @@ async function dbDo(store, mode, fn) {
     const tx = db.transaction(store, mode);
     const req = fn(tx.objectStore(store));
     tx.oncomplete = () => ok(req && req.result);
-    tx.onerror = () => ng(tx.error);
-    tx.onabort = () => ng(tx.error || new Error('しまえませんでした'));
+    tx.onerror = () => ng(tx.error || (req && req.error) || new Error('しまえませんでした'));
+    tx.onabort = () => ng(tx.error || (req && req.error) || new Error('しまえませんでした'));
   });
 }
-const dbGet = (s, k) => dbDo(s, 'readonly', (o) => o.get(k));
-const dbPut = (s, k, v) => dbDo(s, 'readwrite', (o) => o.put(v, k));
+// iPhone・iPad の Safari（ふつうのタブ）では、ファイルの形のまま しまえないことがある → 中身のバイト列にしてしまう
+const BLOB_TAG = '__bvblob';
+async function packBlobs(v) {
+  if (v instanceof Blob) return { [BLOB_TAG]: await v.arrayBuffer(), type: v.type };
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    const o = {};
+    for (const k of Object.keys(v)) o[k] = v[k] instanceof Blob ? await packBlobs(v[k]) : v[k];
+    return o;
+  }
+  return v;
+}
+function unpackBlobs(v) {
+  if (v && typeof v === 'object' && v[BLOB_TAG] instanceof ArrayBuffer) return new Blob([v[BLOB_TAG]], { type: v.type || '' });
+  if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Blob)) {
+    let o = null;
+    for (const k of Object.keys(v)) if (v[k] && v[k][BLOB_TAG] instanceof ArrayBuffer) { o = o || { ...v }; o[k] = unpackBlobs(v[k]); }
+    return o || v;
+  }
+  return v;
+}
+const dbGet = async (s, k) => unpackBlobs(await dbDo(s, 'readonly', (o) => o.get(k)));
+const dbPut = async (s, k, v) => {
+  try { return await dbDo(s, 'readwrite', (o) => o.put(v, k)); }
+  catch (e) {
+    if (e && e.name === 'QuotaExceededError') throw e;
+    const pv = await packBlobs(v);
+    if (pv === v) throw e;
+    return dbDo(s, 'readwrite', (o) => o.put(pv, k));
+  }
+};
 const dbDel = (s, k) => dbDo(s, 'readwrite', (o) => o.delete(k));
 const dbAll = (s) => dbDo(s, 'readonly', (o) => o.getAll());
 const dbKeys = (s) => dbDo(s, 'readonly', (o) => o.getAllKeys());
@@ -592,11 +620,7 @@ $('fileInput').addEventListener('change', async (ev) => {
     try {
       const cover = await makeCover(f, kind);
       // 中身をこの端末の中に写す（もとのファイルが動いても読めるように）
-      try { await dbPut('files', id, f); }
-      catch (e) {
-        if (e && e.name === 'QuotaExceededError') throw e;
-        await dbPut('files', id, new Blob([await f.arrayBuffer()], { type: f.type }));
-      }
+      await dbPut('files', id, f);  // うまくしまえないときは、dbPut がバイト列にしてしまいなおす
       cover.stamp = f.size + ':' + (f.lastModified || 0);
       await dbPut('covers', id, cover);
       await dbPut('books', id, { id, src: 'local', title: baseName(f.name), kind, size: f.size, added: Date.now() });
