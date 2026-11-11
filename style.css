@@ -1,5 +1,6 @@
 /* BookViewer の見た目 */
 :root {
+  --topx: 0px;  /* iPhone・iPad でホーム画面から開いたとき、上のぼかしをよける分 */
   --bg: #111827; --panel: #1f2937; --line: #374151; --text: #f3f4f6; --sub: #9ca3af;
   --accent: #3b82f6; --danger: #dc2626;
 }
@@ -18,7 +19,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 .bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px;
   padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
 #library > .bar, #setView > .bar { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
-  padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+  padding-top: max(10px, calc(env(safe-area-inset-top) + var(--topx))); flex-wrap: wrap; }
 .bar h1 { font-size: 20px; margin: 0; }
 .grow { flex: 1; }
 .btn { appearance: none; border: 1px solid var(--line); background: #374151; color: var(--text); border-radius: 8px;
@@ -61,7 +62,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
   padding: 10px 16px; border-radius: 8px; pointer-events: none; }
 
 .overlay { position: absolute; left: 0; right: 0; background: rgba(17,24,39,.92); z-index: 10; transition: transform .2s, opacity .2s; }
-.overlay.top { top: 0; padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.overlay.top { top: 0; padding-top: max(10px, calc(env(safe-area-inset-top) + var(--topx))); flex-wrap: wrap; }
 .overlay.bottom { bottom: 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 #reader.hideui .overlay.top { transform: translateY(-100%); opacity: 0; pointer-events: none; }
 #reader.hideui .overlay.bottom { transform: translateY(100%); opacity: 0; pointer-events: none; }
@@ -80,7 +81,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 
 /* 文字で探す */
 .search { position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 30; background: var(--panel);
-  border-left: 1px solid var(--line); display: flex; flex-direction: column; padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom)); gap: 8px; }
+  border-left: 1px solid var(--line); display: flex; flex-direction: column; padding: max(10px, calc(env(safe-area-inset-top) + var(--topx))) 12px max(10px, env(safe-area-inset-bottom)); gap: 8px; }
 .srow { display: flex; gap: 6px; align-items: center; }
 .srow input { flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: #111827; color: var(--text); }
 .small2 { font-size: 13px; color: var(--sub); justify-content: space-between; }
@@ -112,7 +113,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 /* 聞く画面（BookPlayer の本） */
 #listen { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
 #listen[hidden] { display: none; }
-.lbar { background: var(--panel); border-bottom: 1px solid var(--line); padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: 8px; }
+.lbar { background: var(--panel); border-bottom: 1px solid var(--line); padding-top: max(8px, calc(env(safe-area-inset-top) + var(--topx))); padding-bottom: 8px; }
 .ltitles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ltitle { font-weight: 600; overflow: hidden; line-height: 1.3; word-break: break-all; cursor: pointer;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
@@ -130,7 +131,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 #lsPageInfo:empty { display: none; }
 #lsLoading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 16px; }
 #lsLoading[hidden] { display: none; }
-#lsFullCtrl { display: none; position: absolute; right: max(8px, env(safe-area-inset-right)); top: max(8px, env(safe-area-inset-top));
+#lsFullCtrl { display: none; position: absolute; right: max(8px, env(safe-area-inset-right)); top: max(8px, calc(env(safe-area-inset-top) + var(--topx)));
   gap: 6px; opacity: .45; z-index: 5; }
 #lsFullCtrl:hover, #lsFullCtrl:active { opacity: .9; }
 #lsFullCtrl .btn { background: rgba(31,41,55,.85); border: 0; padding: 10px 12px; font-size: 16px; }
@@ -164,7 +165,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 .fshade { position: absolute; inset: 0; background: #000; opacity: 0; }
 
 /* 画面いっぱいのときの時計 */
-.clock { position: fixed; top: max(6px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); z-index: 9;
+.clock { position: fixed; top: max(6px, calc(env(safe-area-inset-top) + var(--topx))); left: max(10px, env(safe-area-inset-left)); z-index: 9;
   background: rgba(0,0,0,.55); color: #f3f4f6; font-size: 14px; padding: 2px 9px; border-radius: 10px; pointer-events: none;
   font-variant-numeric: tabular-nums; }
 /* 上下のボタンを出しているあいだは、時計を隠す（ボタンと重ならないように） */
@@ -172,3 +173,6 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 
 /* 指でつまんでめくるときの絵 */
 .curl { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+
+/* iPhone・iPad のホーム画面から開いたとき：時計の下のぼかしにボタンがかからないよう、少し下げる */
+html.iosapp { --topx: 40px; }

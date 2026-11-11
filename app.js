@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v24';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v25';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1213,6 +1213,7 @@ $('slider').addEventListener('change', () => show(+$('slider').value - 1));
 // iPad・iPhone の Safari は、ページを画面いっぱいにするしくみが効かない（押しても何も起きない）のでボタンを出さない
 // （ホーム画面から開いたときは、はじめから画面いっぱい）
 const appleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (appleTouch && (navigator.standalone || matchMedia('(display-mode: standalone)').matches)) document.documentElement.classList.add('iosapp');
 const canFull = !!document.documentElement.requestFullscreen && !appleTouch;
 function toggleFull() {
   if (!canFull) return;
