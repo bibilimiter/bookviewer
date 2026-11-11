@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v28';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v29';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -453,6 +453,23 @@ async function showLibrary() {
   const t = (it) => (loadJson('bv_pos_' + it.id, {}).t || 0);
   items.sort((a, b) => (t(b) - t(a)) || collator.compare((a.folder || '') + a.title, (b.folder || '') + b.title));
   const box = $('books'); box.innerHTML = '';
+  // フォルダ（1段だけ）：トップではフォルダと、どこにも入っていない本を、フォルダの中ではその本だけを出す
+  const groups = new Map();
+  for (const f of shelfFolders()) groups.set(f, { name: f, app: true, n: 0, first: null });
+  for (const it of items) {
+    const f = folderOf(it); if (!f) continue;
+    if (!groups.has(f)) groups.set(f, { name: f, app: false, n: 0, first: null });
+    const g = groups.get(f); g.n++; if (!g.first) g.first = it;
+  }
+  if (LIB.folder != null && !groups.has(LIB.folder)) LIB.folder = null;
+  $('folderBar').hidden = LIB.folder == null;
+  if (LIB.folder != null) {
+    const g = groups.get(LIB.folder);
+    $('folderName').textContent = '📁 ' + LIB.folder;
+    $('folderRename').hidden = $('folderDel').hidden = !g.app;
+  }
+  const shown = items.filter((it) => (folderOf(it) || null) === LIB.folder);
+  if (LIB.folder == null) renderFolders(box, [...groups.values()].sort((a, b) => collator.compare(a.name, b.name)));
   const hint = $('libHint');
   if (!items.length && !hint.dataset.busy) {
     hint.hidden = false;
@@ -461,7 +478,7 @@ async function showLibrary() {
       : '「＋ 本を取りこむ」で、漫画（JPEG の入った ZIP）や小説（PDF）を選んでください。<br>本はこの端末の中にしまうので、次からはネットなしで読めます。';
   } else if (!hint.dataset.busy) hint.hidden = true;
 
-  renderCards(box, items);
+  renderCards(box, shown);
   if (navigator.storage && navigator.storage.estimate) {
     try {
       const e = await navigator.storage.estimate();
@@ -470,6 +487,85 @@ async function showLibrary() {
     } catch (e) { }
   }
 }
+// ---------------- 本棚のフォルダ（1段だけ） ----------------
+// 取りこんだ本：アプリの中で作ったフォルダ（bv_folders）に入れる（bv_shelf = { 本のid: フォルダ名 }）
+// Windows で選んだフォルダの本：PC の中のいちばん上のフォルダを、そのままフォルダとして見せる
+const LIB = { folder: null };
+const shelfFolders = () => loadJson('bv_folders', []);
+const shelfMap = () => loadJson('bv_shelf', {});
+function folderOf(it) {
+  if (it.src === 'dir') { const f = (it.folder || '').split('/')[0]; return f || ''; }
+  const f = shelfMap()[it.id];
+  return f && shelfFolders().includes(f) ? f : '';
+}
+function openFolder(name) { LIB.folder = name; window.scrollTo(0, 0); showLibrary(); }
+function renderFolders(box, groups) {
+  for (const g of groups) {
+    const el = document.createElement('div'); el.className = 'book folder';
+    const cv = document.createElement('div'); cv.className = 'cv';
+    const ic = document.createElement('div'); ic.className = 'ficon'; ic.textContent = '📁';
+    cv.append(ic);
+    const ti = document.createElement('div'); ti.className = 't'; ti.textContent = g.name;
+    const p = document.createElement('div'); p.className = 'p'; p.textContent = g.n + ' 冊';
+    el.append(cv, ti, p);
+    el.onclick = () => openFolder(g.name);
+    box.append(el);
+    if (g.first) dbGet('covers', g.first.id).then((c) => {  // いちばん新しく読んだ本の表紙を、うすく敷く
+      if (!c || !c.blob) return;
+      const u = URL.createObjectURL(c.blob); libUrls.push(u);
+      const img = document.createElement('img'); img.alt = ''; img.src = u; cv.prepend(img);
+    }).catch(() => { });
+  }
+}
+function askFolderName(title, def) {
+  const n = (prompt(title, def || '') || '').trim().replace(/\s+/g, ' ');
+  if (!n) return null;
+  if (shelfFolders().includes(n) && n !== def) { alert('「' + n + '」というフォルダはもうあります'); return null; }
+  return n;
+}
+$('folderNew').onclick = () => {
+  const n = askFolderName('新しいフォルダの名前'); if (!n) return;
+  saveJson('bv_folders', [...shelfFolders(), n]);
+  showLibrary();
+};
+$('folderUp').onclick = () => openFolder(null);
+$('folderRename').onclick = () => {
+  const old = LIB.folder, n = askFolderName('フォルダの新しい名前', old); if (!n || n === old) return;
+  saveJson('bv_folders', shelfFolders().map((f) => (f === old ? n : f)));
+  const m = shelfMap(); for (const k of Object.keys(m)) if (m[k] === old) m[k] = n; saveJson('bv_shelf', m);
+  openFolder(n);
+};
+$('folderDel').onclick = () => {
+  const old = LIB.folder;
+  if (!confirm('フォルダ「' + old + '」をなくしますか？\n（中の本は消えません。本棚のいちばん上にもどります）')) return;
+  saveJson('bv_folders', shelfFolders().filter((f) => f !== old));
+  const m = shelfMap(); for (const k of Object.keys(m)) if (m[k] === old) delete m[k]; saveJson('bv_shelf', m);
+  openFolder(null);
+};
+// 本をフォルダへ移す：行き先をボタンで選ぶ
+function moveBook(it) {
+  const dlg = $('moveDlg'), list = $('moveList');
+  $('moveTitle').textContent = '「' + it.title + '」をどこへ移しますか？';
+  list.innerHTML = '';
+  const cur = folderOf(it);
+  const go = (f) => {
+    const m = shelfMap(); if (f) m[it.id] = f; else delete m[it.id]; saveJson('bv_shelf', m);
+    dlg.hidden = true; showLibrary();
+  };
+  const add = (label, f) => {
+    const b = document.createElement('button'); b.className = 'btn' + (f === cur ? ' primary' : ''); b.textContent = label;
+    b.onclick = () => go(f); list.append(b);
+  };
+  add('本棚（フォルダに入れない）', '');
+  for (const f of shelfFolders()) add('📁 ' + f, f);
+  const nb = document.createElement('button'); nb.className = 'btn'; nb.textContent = '＋ 新しいフォルダを作って入れる';
+  nb.onclick = () => { const n = askFolderName('新しいフォルダの名前'); if (!n) return; saveJson('bv_folders', [...shelfFolders(), n]); go(n); };
+  list.append(nb);
+  dlg.hidden = false;
+}
+$('moveClose').onclick = () => { $('moveDlg').hidden = true; };
+$('moveDlg').onclick = (e) => { if (e.target === $('moveDlg')) $('moveDlg').hidden = true; };
+
 // 本の札を並べる（本棚と、巻の一覧で使う）
 function renderCards(box, items) {
   for (const it of items) {
@@ -507,6 +603,7 @@ function renderCards(box, items) {
         ev.stopPropagation();
         if (!confirm('「' + it.title + '」をこの端末から消しますか？\n（取りこむ前のもとのファイルは消えません）')) return;
         await dbDel('files', it.id); await dbDel('covers', it.id); await dbDel('books', it.id);
+        { const m = shelfMap(); if (m[it.id]) { delete m[it.id]; saveJson('bv_shelf', m); } }
         // まとめの中の巻の表紙と、読んだ位置も消す
         try { for (const k of await dbKeys('covers')) if (String(k).startsWith(it.id + '#')) await dbDel('covers', k); } catch (e) { }
         try {
@@ -516,7 +613,10 @@ function renderCards(box, items) {
         } catch (e) { }
         showLibrary();
       };
-      p.append(del);
+      const mv = document.createElement('button'); mv.className = 'btn mv'; mv.textContent = '移す';
+      mv.onclick = (ev) => { ev.stopPropagation(); moveBook(it); };
+      const btns = document.createElement('span'); btns.className = 'pbtns'; btns.append(mv, del);
+      p.append(btns);
     }
     // まとめの中で、いま読んでいる巻に目印を付ける
     const cur = it.parent && (loadJson('bv_pos_' + it.parent.id, {}) || {}).vol === it.entry;

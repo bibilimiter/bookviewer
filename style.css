@@ -178,3 +178,22 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 html.iosapp { --topx: 40px; }
 /* ページも時計の下のぼかしにかからないよう、上をあけて始める */
 html.iosapp #stage { top: calc(env(safe-area-inset-top) + 16px); }
+
+/* 本棚のフォルダ */
+.book.folder .cv { display: flex; align-items: center; justify-content: center; background: #253043; }
+.book.folder .cv img { position: absolute; inset: 0; opacity: .28; }
+.book.folder .ficon { position: relative; font-size: 56px; }
+.book.folder .t { font-weight: bold; }
+.fbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 16px 0; }
+.fbar strong { font-size: 17px; flex: 1 1 8em; min-width: 0; word-break: break-all; }
+.fbar .fact { display: flex; gap: 8px; margin-left: auto; }
+.fbar .fact .btn.del { padding: 8px 12px; font-size: 15px; }
+.pbtns { display: flex; gap: 4px; }
+.btn.mv { background: transparent; padding: 4px 10px; font-size: 13px; }
+.btn.mv:hover { background: #374151; }
+.dlgback { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.dlgback[hidden] { display: none; }
+.dlg { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; width: min(420px, 100%); max-height: 80vh; overflow: auto; }
+.dlg .srow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.mlist { display: flex; flex-direction: column; gap: 8px; }
+.mlist .btn { text-align: left; white-space: normal; }

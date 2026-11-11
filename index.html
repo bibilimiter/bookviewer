@@ -26,6 +26,7 @@
   <header class="bar">
     <h1>BookViewer</h1>
     <span class="grow"></span>
+    <button id="folderNew" class="btn" title="本を分けて入れるフォルダを作る">＋📁</button>
     <button id="pickDir" class="btn" hidden>📁 フォルダを選ぶ</button>
     <label class="btn primary" for="fileInput">＋ 本を取りこむ</label>
     <input id="fileInput" type="file" accept=".zip,.cbz,.pdf,application/zip,application/pdf" multiple hidden>
@@ -34,10 +35,24 @@
     <span id="dirText"></span>
     <button id="dirAllow" class="btn primary" hidden>読みこむ</button>
   </div>
+  <div id="folderBar" class="fbar" hidden>
+    <button id="folderUp" class="btn">‹ 本棚</button>
+    <strong id="folderName" class="grow"></strong>
+    <span class="fact">
+      <button id="folderRename" class="btn">名前を変える</button>
+      <button id="folderDel" class="btn del">フォルダをなくす</button>
+    </span>
+  </div>
   <p id="libHint" class="hint" hidden></p>
   <div id="books" class="books"></div>
   <p id="storage" class="small"></p>
   <p id="ver" class="small"></p>
+  <div id="moveDlg" class="dlgback" hidden>
+    <div class="dlg">
+      <div class="srow"><strong id="moveTitle" class="grow"></strong><button id="moveClose" class="btn" title="閉じる">✕</button></div>
+      <div id="moveList" class="mlist"></div>
+    </div>
+  </div>
 </section>
 
 <!-- 何巻かのまとめの、巻の一覧 -->
