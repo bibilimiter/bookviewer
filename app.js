@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v29';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v30';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -450,7 +450,7 @@ async function showLibrary() {
   try { local = await dbAll('books'); } catch (e) { }
   local.forEach((b) => { b.title = b.title.replace(/\.book$/i, ''); });
   const items = [...DIR.items, ...local];
-  const t = (it) => (loadJson('bv_pos_' + it.id, {}).t || 0);
+  const t = (it) => Math.max(loadJson('bv_pos_' + it.id, {}).t || 0, loadJson('bv_listen_' + it.id, {}).t || 0);  // 🎧 の本は聞いた時刻
   items.sort((a, b) => (t(b) - t(a)) || collator.compare((a.folder || '') + a.title, (b.folder || '') + b.title));
   const box = $('books'); box.innerHTML = '';
   // フォルダ（1段だけ）：トップではフォルダと、どこにも入っていない本を、フォルダの中ではその本だけを出す
@@ -1072,9 +1072,11 @@ function curlLimit(s, x, y) {
 }
 function curlDraw() {
   const s = CURL.s, c = CURL.cv; if (!s || !c) return;
+  // 白黒反転のときは、影と光を逆にしておく（あとで色ごと反転されるため）
+  const inv = document.body.dataset.tone === 'night', DK = inv ? 'rgba(255,255,255,' : 'rgba(0,0,0,', LT = 'rgba(255,255,255,';
   const g = c.getContext('2d'), W = stage.clientWidth, H = stage.clientHeight, k = c.width / W;
   g.setTransform(k, 0, 0, k, 0, 0);
-  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  g.clearRect(0, 0, W, H);  // 外は下の黒い地が見える（夜用の色で反転しても黒のまま）
   if (!s.B) { g.drawImage(s.A.c, 0, 0, W, H); return; }  // めくった後の絵がまだできていない
   const sh = s.sheet, path = (pl) => { g.beginPath(); pl.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.closePath(); };
   // 下：めくった後の画面
@@ -1094,21 +1096,21 @@ function curlDraw() {
   if (fold.length > 2) {
     g.save(); path(fold); g.clip();
     const gr = g.createLinearGradient(M.x, M.y, M.x - n.x * 40, M.y - n.y * 40);
-    gr.addColorStop(0, 'rgba(0,0,0,0.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    gr.addColorStop(0, DK + '0.35)'); gr.addColorStop(1, DK + '0)');
     g.fillStyle = gr; g.fillRect(0, 0, W, H); g.restore();
   }
   // めくっている紙の、まだおもての部分
   if (stay.length > 2) {
     g.save(); path(stay); g.clip(); g.drawImage(s.A.c, 0, 0, W, H);
     const gr = g.createLinearGradient(M.x, M.y, M.x + n.x * 30, M.y + n.y * 30);
-    gr.addColorStop(0, 'rgba(0,0,0,0.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    gr.addColorStop(0, DK + '0.18)'); gr.addColorStop(1, DK + '0)');
     g.fillStyle = gr; g.fillRect(0, 0, W, H); g.restore();
   }
   // 折り返した裏（折れ目で鏡に映した形）
   if (fold.length > 2) {
     const ref = (q) => { const d = (q.x - M.x) * n.x + (q.y - M.y) * n.y; return { x: q.x - 2 * d * n.x, y: q.y - 2 * d * n.y }; };
     const flap = fold.map(ref);
-    g.save(); g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 18; path(flap); g.fillStyle = '#ece8df'; g.fill(); g.restore();
+    g.save(); g.shadowColor = DK + '0.45)'; g.shadowBlur = 18; path(flap); g.fillStyle = '#ece8df'; g.fill(); g.restore();
     g.save(); path(flap); g.clip();
     const a = Math.atan2(n.y, n.x);
     g.translate(M.x, M.y); g.rotate(a); g.scale(-1, 1); g.rotate(-a); g.translate(-M.x, -M.y);
@@ -1117,7 +1119,7 @@ function curlDraw() {
     g.restore();
     g.save(); path(flap); g.clip();
     const gr = g.createLinearGradient(M.x, M.y, M.x - n.x * len * 0.5, M.y - n.y * len * 0.5);
-    gr.addColorStop(0, 'rgba(255,255,255,0.3)'); gr.addColorStop(0.5, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.12)');
+    gr.addColorStop(0, LT + '0.3)'); gr.addColorStop(0.5, LT + '0)'); gr.addColorStop(1, DK + '0.12)');
     g.fillStyle = gr; g.fillRect(0, 0, W, H); g.restore();
   }
 }
@@ -1192,6 +1194,21 @@ $('flipBtn').onclick = () => {
   toast(FLIP.on ? 'めくる動きをつけます' : 'めくる動きをやめます');
 };
 updateFlipBtn();
+
+// ---------------- 夜用の色（ページの色を変える。全部の本で共通） ----------------
+const TONES = [['normal', 'ふつう'], ['sepia', 'セピア'], ['dim', '暗め'], ['night', '白黒反転']];
+let tone = loadJson('bv_tone', 'normal');
+function applyTone() {
+  if (!TONES.some((t) => t[0] === tone)) tone = 'normal';
+  document.body.dataset.tone = tone;
+  $('toneBtn').textContent = '色：' + TONES.find((t) => t[0] === tone)[1];
+  $('toneBtn').classList.toggle('on', tone !== 'normal');
+}
+$('toneBtn').onclick = () => {
+  const i = TONES.findIndex((t) => t[0] === tone);
+  tone = TONES[(i + 1) % TONES.length][0]; saveJson('bv_tone', tone); applyTone();
+};
+applyTone();
 
 async function prepare(s, tok) {
   if (s >= R.src.count) return;

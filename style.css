@@ -197,3 +197,8 @@ html.iosapp #stage { top: calc(env(safe-area-inset-top) + 16px); }
 .dlg .srow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .mlist { display: flex; flex-direction: column; gap: 8px; }
 .mlist .btn { text-align: left; white-space: normal; }
+
+/* 夜用の色：ページ（とめくる絵）にだけかける */
+body[data-tone="sepia"] #pages, body[data-tone="sepia"] canvas.curl { filter: sepia(.55) brightness(.93); }
+body[data-tone="dim"] #pages, body[data-tone="dim"] canvas.curl { filter: brightness(.6); }
+body[data-tone="night"] #pages, body[data-tone="night"] canvas.curl { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
