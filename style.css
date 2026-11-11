@@ -176,3 +176,5 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 
 /* iPhone・iPad のホーム画面から開いたとき：時計の下のぼかしにボタンがかからないよう、少し下げる */
 html.iosapp { --topx: 40px; }
+/* ページも時計の下のぼかしにかからないよう、上をあけて始める */
+html.iosapp #stage { top: calc(env(safe-area-inset-top) + 16px); }
