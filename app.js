@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v26';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v27';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1220,6 +1220,11 @@ window.addEventListener('popstate', () => {
 });
 $('back').onclick = () => history.back();
 $('title').onclick = () => $('title').classList.toggle('open');  // 長い題名を全部見る
+// 全部出しているときは、上の帯のボタン以外のどこを押しても元にもどす（題名が下の行へ移って、もとの場所が空くため）
+$('topBar').addEventListener('click', (e) => {
+  if (e.target === $('title') || !$('title').classList.contains('open') || e.target.closest('button, input, select')) return;
+  $('title').classList.remove('open');
+});
 
 $('dirBtn').onclick = () => { R.opt.dir = R.opt.dir === 'rtl' ? 'ltr' : 'rtl'; saveOpt(); updateBars(); };
 $('spreadBtn').onclick = () => {
