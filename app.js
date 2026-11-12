@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v31';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v32';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -770,7 +770,16 @@ $('fileInput').addEventListener('change', async (ev) => {
   if (done && navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch (e) { } }
   delete hint.dataset.busy; hint.textContent = '';
   await showLibrary();
-  if (bad.length) alert('取りこめなかった本があります：\n' + bad.join('\n'));
+  if (bad.length) {
+    // 入らなかったときは、しまえる量の残りも出す（iPhone・iPad は上限が小さいことがある）
+    let room = '';
+    try {
+      const e = await navigator.storage.estimate();
+      if (e.quota) room = '\n\n使っている量：' + Math.round((e.usage || 0) / 1048576) + ' MB ／ 使える量の目安：' + Math.round(e.quota / 1048576) + ' MB' +
+        '\n入らないときは、読み終わった本を「消す」と空きができます。';
+    } catch (e) { }
+    alert('取りこめなかった本があります：\n' + bad.join('\n') + room);
+  }
 });
 
 // ---------------- 読む画面 ----------------
