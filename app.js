@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v30';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v31';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -565,6 +565,44 @@ function moveBook(it) {
 }
 $('moveClose').onclick = () => { $('moveDlg').hidden = true; };
 $('moveDlg').onclick = (e) => { if (e.target === $('moveDlg')) $('moveDlg').hidden = true; };
+
+// ---------------- 本棚の大きさ（ピンチ・ボタン・Ctrl＋ホイール）。0 は表紙なしの一覧 ----------------
+// 端末ごとに覚える（bv_shelfsize）
+const SHELF_SIZES = [[0, '一覧'], [62, '極小'], [82, '特小'], [108, '小'], [140, '中'], [185, '大'], [240, '特大']];
+let shelfSize = loadJson('bv_shelfsize', 4);
+function applyShelfSize(say) {
+  shelfSize = Math.max(0, Math.min(SHELF_SIZES.length - 1, shelfSize | 0));
+  const [w, name] = SHELF_SIZES[shelfSize];
+  document.documentElement.style.setProperty('--card', (w || 140) + 'px');
+  for (const id of ['books', 'vols']) $(id).classList.toggle('list', !w);
+  $('sizeBtn').textContent = '表示：' + name;
+  saveJson('bv_shelfsize', shelfSize);
+  if (say) toast('本棚：' + name);
+}
+function stepShelf(d) {
+  const n = Math.max(0, Math.min(SHELF_SIZES.length - 1, shelfSize + d));
+  if (n !== shelfSize) { shelfSize = n; applyShelfSize(true); }
+}
+$('sizeBtn').onclick = () => { shelfSize = (shelfSize + 1) % SHELF_SIZES.length; applyShelfSize(true); };
+for (const id of ['library', 'setView']) {
+  const v = $(id); let pin = null;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  v.addEventListener('touchstart', (e) => { if (e.touches.length === 2) pin = { d: dist(e.touches) }; }, { passive: true });
+  v.addEventListener('touchmove', (e) => {
+    if (!pin || e.touches.length !== 2) return;
+    e.preventDefault();
+    const r = dist(e.touches) / pin.d;
+    if (r > 1.4) { stepShelf(1); pin.d = dist(e.touches); }       // 広げる：大きく
+    else if (r < 0.72) { stepShelf(-1); pin.d = dist(e.touches); }  // つまむ：小さく
+  }, { passive: false });
+  v.addEventListener('touchend', (e) => { if (e.touches.length < 2) pin = null; });
+  v.addEventListener('wheel', (e) => {  // PC：Ctrl を押しながらホイール
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (Math.abs(e.deltaY) > 2) stepShelf(e.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+}
+applyShelfSize(false);
 
 // 本の札を並べる（本棚と、巻の一覧で使う）
 function renderCards(box, items) {

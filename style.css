@@ -35,7 +35,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 .hint { margin: 16px; color: var(--sub); line-height: 1.7; }
 .small { margin: 16px; color: var(--sub); font-size: 13px; }
 
-.books { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px 14px; padding: 16px; }
+.books { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(var(--card, 140px), 42vw), 1fr)); gap: 18px min(14px, calc(var(--card, 140px) / 8)); padding: 16px; }
 .book { cursor: pointer; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .book .cv { position: relative; aspect-ratio: 7 / 10; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 13px; }
@@ -202,3 +202,15 @@ html.iosapp #stage { top: calc(env(safe-area-inset-top) + 16px); }
 body[data-tone="sepia"] #pages, body[data-tone="sepia"] canvas.curl { filter: sepia(.55) brightness(.93); }
 body[data-tone="dim"] #pages, body[data-tone="dim"] canvas.curl { filter: brightness(.6); }
 body[data-tone="night"] #pages, body[data-tone="night"] canvas.curl { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+
+/* 本棚の大きさ：ピンチで変えるので、ブラウザの拡大はさせない */
+#library, #setView { touch-action: pan-x pan-y; }
+.book .p { flex-wrap: wrap; }
+/* 一覧表示（表紙を小さく、1行に1冊） */
+.books.list { grid-template-columns: 1fr; gap: 0; padding: 4px 16px 16px; }
+.books.list .book { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.books.list .book .cv { width: 40px; border-radius: 3px; grid-row: 1 / span 2; }
+.books.list .book .tag, .books.list .book .mark { display: none; }
+.books.list .book .t { -webkit-line-clamp: 1; font-size: 15px; grid-column: 2 / span 2; }
+.books.list .book .p { grid-column: 2 / span 2; }
+.books.list .book.folder .ficon { font-size: 22px; }
