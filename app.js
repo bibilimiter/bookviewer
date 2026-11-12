@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v32';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v33';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -752,16 +752,25 @@ $('fileInput').addEventListener('change', async (ev) => {
   let done = 0;
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
-    hint.textContent = '取りこんでいます（' + (i + 1) + ' / ' + files.length + '）：' + f.name + '（' + Math.round(f.size / 1048576) + ' MB）';
+    const head = '取りこんでいます（' + (i + 1) + ' / ' + files.length + '）：' + f.name + '（' + Math.round(f.size / 1048576) + ' MB）';
+    // どの作業で止まっているかを出す（iPhone で止まったまま終わらないことがあるため）。長くかかりすぎたら、あきらめて次へ
+    const step = async (label, ms, work) => {
+      hint.textContent = head + '\n… ' + label;
+      let timer;
+      try {
+        return await Promise.race([work(), new Promise((_, ng) => { timer = setTimeout(() => ng(new Error('「' + label + '」が ' + Math.round(ms / 1000) + ' 秒たっても終わりませんでした')), ms); })]);
+      } finally { clearTimeout(timer); }
+    };
     if (!BOOK_RE.test(f.name)) { bad.push(f.name + '：ZIP か PDF ではありません'); continue; }
     const kind = kindOf(f.name), id = 'local:' + f.name + ':' + f.size;
     try {
-      const cover = await makeCover(f, kind);
+      const cover = await step('表紙を作っています', 90000, () => makeCover(f, kind));
       // 中身をこの端末の中に写す（もとのファイルが動いても読めるように）
-      await dbPut('files', id, f);  // うまくしまえないときは、dbPut がバイト列にしてしまいなおす
+      const big = Math.max(120000, f.size / 1048576 * 2000);  // 1 MB あたり2秒まで待つ
+      await step('本の中身をしまっています', big, () => dbPut('files', id, f));  // うまくしまえないときは、dbPut がバイト列にしてしまいなおす
       cover.stamp = f.size + ':' + (f.lastModified || 0);
-      await dbPut('covers', id, cover);
-      await dbPut('books', id, { id, src: 'local', title: baseName(f.name), kind, size: f.size, added: Date.now() });
+      await step('表紙をしまっています', 60000, () => dbPut('covers', id, cover));
+      await step('本棚に書いています', 60000, () => dbPut('books', id, { id, src: 'local', title: baseName(f.name), kind, size: f.size, added: Date.now() }));
       done++;
     } catch (e) {
       bad.push(f.name + '：' + (e && e.name === 'QuotaExceededError' ? '端末の空きが足りません' : errText(e)));
