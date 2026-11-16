@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v34';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v35';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -636,77 +636,6 @@ for (const id of ['library', 'setView']) {
 applyShelfSize(false);
 
 function mbText(b) { const m = b / 1048576; if (m < 0.1) return '0.1 MB 未満'; return m >= 1000 ? (Math.round(m / 102.4) / 10) + ' GB' : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + ' MB'; }
-
-// ---------------- 読んだ位置・しおりを、別の端末へ写す（ファイルに書き出す・読みこむ） ----------------
-// 本は「ファイルの名前」で見分ける（端末ごとに本の見分け方がちがうため）
-const SYNC_KINDS = ['pos', 'marks', 'listen', 'view'];
-function fileKeyOf(id) {
-  id = String(id);
-  if (id.startsWith('local:')) return id.slice(6).replace(/:\d+$/, '');
-  if (id.startsWith('dir:')) return id.slice(4).split('/').pop();
-  return id;
-}
-$('syncOut').onclick = async () => {
-  const recs = [];
-  for (const k of Object.keys(localStorage)) {
-    const m = /^bv_(pos|marks|listen|view)_(.+)$/.exec(k); if (!m) continue;
-    const i = m[2].indexOf('#'), id = i < 0 ? m[2] : m[2].slice(0, i), sub = i < 0 ? '' : m[2].slice(i + 1);
-    recs.push({ k: m[1], f: fileKeyOf(id), sub, v: loadJson(k, null) });
-  }
-  const shelf = shelfMap(), folders = [];
-  for (const id of Object.keys(shelf)) { recs.push({ k: 'shelf', f: fileKeyOf(id), sub: '', v: shelf[id] }); }
-  const data = { app: 'BookViewer', v: 1, t: Date.now(), folders: shelfFolders(), recs };
-  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-  const d = new Date(), pad = (n) => String(n).padStart(2, '0');
-  const name = 'BookViewer_position_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
-  // iPhone・iPad は「共有」から「ファイルに保存」や AirDrop で送る
-  if (typeof appleTouch !== 'undefined' && appleTouch && navigator.canShare) {
-    try {
-      const file = new File([blob], name, { type: 'application/json' });
-      if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
-    } catch (e) { if (e && e.name === 'AbortError') return; }
-  }
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-  toast('書き出しました：' + name, 4000);
-};
-$('syncIn').addEventListener('change', async (ev) => {
-  const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
-  let data;
-  try { data = JSON.parse(await f.text()); if (!data || data.app !== 'BookViewer' || !Array.isArray(data.recs)) throw 0; }
-  catch (e) { alert('BookViewer で書き出したファイルではないようです'); return; }
-  let local = []; try { local = await dbAll('books'); } catch (e) { }
-  const byFile = new Map();
-  for (const it of [...DIR.items, ...local]) { const fk = fileKeyOf(it.id); if (!byFile.has(fk)) byFile.set(fk, []); byFile.get(fk).push(it.id); }
-  const hitBooks = new Set(), missBooks = new Set();
-  const folders = shelfFolders(), shelf = shelfMap();
-  for (const r of data.recs) {
-    const ids = byFile.get(r.f);
-    if (!ids) { missBooks.add(r.f); continue; }
-    hitBooks.add(r.f);
-    for (const id of ids) {
-      if (r.k === 'shelf') {
-        if (!shelf[id] && r.v && !id.startsWith('dir:')) { shelf[id] = r.v; if (!folders.includes(r.v)) folders.push(r.v); }
-        continue;
-      }
-      if (!SYNC_KINDS.includes(r.k)) continue;
-      const key = 'bv_' + r.k + '_' + id + (r.sub ? '#' + r.sub : ''), cur = loadJson(key, null);
-      let v = r.v;
-      if (r.k === 'pos' || r.k === 'listen') { if (cur && (cur.t || 0) >= (v && v.t || 0)) continue; }  // 新しいほうを残す
-      else if (r.k === 'marks') {  // しおりは、両方を合わせる
-        const all = [...(cur || [])];
-        for (const m of v || []) if (!all.some((x) => x.p === m.p)) all.push(m);
-        v = all.sort((a, b) => a.p - b.p);
-      } else if (cur) continue;  // 見せ方は、この端末のものを残す
-      saveJson(key, v);
-    }
-  }
-  saveJson('bv_folders', folders); saveJson('bv_shelf', shelf);
-  await showLibrary();
-  alert('読みこみました：' + hitBooks.size + ' 冊の読んだ位置・しおりを写しました' +
-    (missBooks.size ? '\n（この端末にない本 ' + missBooks.size + ' 冊の分は、写していません）' : ''));
-});
 
 // 本の札を並べる（本棚と、巻の一覧で使う）
 function renderCards(box, items) {

@@ -228,8 +228,5 @@ body[data-tone="night"] #pages, body[data-tone="night"] canvas.curl { filter: in
 .book.done .t::before { content: '✓ '; color: #4ade80; font-weight: bold; }
 .book.done .cv::after { content: '読了'; position: absolute; right: 4px; bottom: 8px; background: #15803d; color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 4px; }
 .books.list .book.done .cv::after { display: none; }
-/* 読んだ位置を写す */
-.syncrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 16px 8px; }
-.syncrow .btn { font-size: 13px; padding: 6px 10px; }
 .books.list .book .p { justify-content: flex-start; }
 .books.list .book .pbtns { margin-left: auto; }
