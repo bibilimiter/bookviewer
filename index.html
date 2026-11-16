@@ -18,6 +18,25 @@
 </head>
 <body>
 
+<!-- ボタンの絵（線の絵にそろえる。Windows・Android・iPad で同じ形に見える） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-full" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-folderplus" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 11v6M9 14h6"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+    <symbol id="i-head" viewBox="0 0 24 24"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  </defs>
+</svg>
+
 <!-- スマホでブラウザが「デスクトップ版サイト」になっているときのお知らせ -->
 <div id="desktopWarn" class="dwarn" hidden>ブラウザが「デスクトップ版サイト」（パソコン用の表示）になっているため、画面がずれます。ブラウザのメニュー（︙）で「デスクトップ版サイト」のチェックを外してください。</div>
 
@@ -26,10 +45,10 @@
   <header class="bar">
     <h1>BookViewer</h1>
     <span class="grow"></span>
-    <button id="sizeBtn" class="btn" title="表紙の大きさ（スマホは2本指で広げる・つまむ、PC は Ctrl＋ホイールでも）">表示：中</button>
-    <button id="folderNew" class="btn" title="本を分けて入れるフォルダを作る">＋📁</button>
-    <button id="pickDir" class="btn" hidden>📁 フォルダを選ぶ</button>
-    <label class="btn primary" for="fileInput">＋ 本を取りこむ</label>
+    <button id="sizeBtn" class="btn" title="表紙の大きさ（スマホは2本指で広げる・つまむ、PC は Ctrl＋ホイールでも）"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span id="sizeLbl" class="lbl">中</span></button>
+    <button id="folderNew" class="btn" title="新しいフォルダを作る（本を分けて入れる）"><svg class="ic" aria-hidden="true"><use href="#i-folderplus"/></svg><span class="lbl">新しいフォルダ</span></button>
+    <button id="editBtn" class="btn" title="本を移す・消すボタンを出す"><svg class="ic" aria-hidden="true"><use href="#i-edit"/></svg><span id="editLbl" class="lbl">編集</span></button>
+    <button id="pickDir" class="btn" title="本の入ったフォルダを選ぶ" hidden><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span id="pickLbl" class="lbl">フォルダを選ぶ</span></button>
     <input id="fileInput" type="file" accept=".zip,.cbz,.pdf,application/zip,application/pdf" multiple hidden>
   </header>
   <div id="dirBar" class="notice" hidden>
@@ -46,7 +65,7 @@
     </select>
   </div>
   <div id="folderBar" class="fbar" hidden>
-    <button id="folderUp" class="btn">‹ 本棚</button>
+    <button id="folderUp" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg><span>本棚</span></button>
     <strong id="folderName" class="grow"></strong>
     <span class="fact">
       <button id="folderRename" class="btn">名前を変える</button>
@@ -59,7 +78,7 @@
   <p id="ver" class="small"></p>
   <div id="moveDlg" class="dlgback" hidden>
     <div class="dlg">
-      <div class="srow"><strong id="moveTitle" class="grow"></strong><button id="moveClose" class="btn" title="閉じる">✕</button></div>
+      <div class="srow"><strong id="moveTitle" class="grow"></strong><button id="moveClose" class="btn" title="閉じる"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div>
       <div id="moveList" class="mlist"></div>
     </div>
   </div>
@@ -68,7 +87,7 @@
 <!-- 何巻かのまとめの、巻の一覧 -->
 <section id="setView" class="view" hidden>
   <header class="bar">
-    <button id="setBack" class="btn">‹ 本棚</button>
+    <button id="setBack" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg><span>本棚</span></button>
     <h1 id="setTitle" class="settitle"></h1>
   </header>
   <div id="vols" class="books"></div>
@@ -81,18 +100,23 @@
   </div>
   <div id="loading" class="loading" hidden>読みこんでいます…</div>
   <header id="topBar" class="bar overlay top">
-    <button id="back" class="btn">‹ 本棚</button>
+    <button id="back" class="btn" title="本棚にもどる"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg><span class="lbl">本棚</span></button>
     <span id="title" class="title"></span>
-    <button id="searchBtn" class="btn" title="文字で探す（PDF）" hidden>🔍</button>
-    <button id="markBtn" class="btn" title="しおり（B キー）">🔖</button>
-    <button id="cropBtn" class="btn" title="ページのまわりの余白を切って、大きく出す">余白</button>
-    <button id="dirBtn" class="btn" title="右開き／左開き"></button>
-    <button id="spreadBtn" class="btn" title="見開き"></button>
-    <button id="flipBtn" class="btn" title="ページをめくる動き">めくり</button>
-    <button id="toneBtn" class="btn" title="ページの色（夜に読むとき）">色：ふつう</button>
-    <button id="shiftBtn" class="btn" title="見開きの組み合わせを1ページずらす">ずらす</button>
-    <button id="fullBtn" class="btn" title="画面いっぱい" hidden>⛶</button>
+    <button id="searchBtn" class="btn" title="文字で探す（PDF）" hidden><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></button>
+    <button id="markBtn" class="btn" title="しおり（B キー）"><svg class="ic" aria-hidden="true"><use href="#i-mark"/></svg></button>
+    <button id="viewBtn" class="btn" title="読み方の設定（ページの向き・見開き・余白・色など）"><svg class="ic" aria-hidden="true"><use href="#i-sliders"/></svg><span class="lbl">表示</span></button>
+    <button id="fullBtn" class="btn" title="画面いっぱい" hidden><svg class="ic" aria-hidden="true"><use href="#i-full"/></svg></button>
   </header>
+  <!-- 読み方の設定（たまに使うボタンをここにまとめる） -->
+  <aside id="viewPanel" class="vpanel" hidden>
+    <div class="vhead"><strong class="grow">読み方の設定</strong><button id="viewClose" class="btn" title="閉じる"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="vrow"><span>ページの向き</span><button id="dirBtn" class="btn" title="右開き／左開き"></button></div>
+    <div class="vrow"><span>ページの数</span><button id="spreadBtn" class="btn" title="1ページ／見開き"></button></div>
+    <div class="vrow"><span>見開きの組み合わせ</span><button id="shiftBtn" class="btn" title="見開きの組み合わせを1ページずらす（見開きのときだけ）"></button></div>
+    <div class="vrow"><span>まわりの余白</span><button id="cropBtn" class="btn" title="ページのまわりの余白を切って、大きく出す"></button></div>
+    <div class="vrow"><span>めくる動き</span><button id="flipBtn" class="btn" title="ページをめくる動き"></button></div>
+    <div class="vrow"><span>ページの色<small>（全部の本）</small></span><button id="toneBtn" class="btn" title="ページの色（夜に読むとき）"></button></div>
+  </aside>
   <div id="searchChip" class="chip" hidden>
     <span id="chipText" class="ctext"></span>
     <button id="chipBack" class="btn tiny primary"></button>
@@ -103,15 +127,15 @@
     <div class="srow">
       <input id="searchInput" type="search" placeholder="探す言葉" enterkeyhint="search" autocomplete="off">
       <button id="searchGo" class="btn primary">探す</button>
-      <button id="searchClose" class="btn" title="閉じる">✕</button>
+      <button id="searchClose" class="btn" title="閉じる"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
     </div>
     <div class="srow small2"><span id="searchStatus" class="sstat"></span><button id="searchClear" class="btn tiny">検索をやめる</button></div>
     <div id="searchList" class="slist"></div>
   </aside>
   <aside id="markPanel" class="search" hidden>
     <div class="srow">
-      <strong class="grow">🔖 しおり</strong>
-      <button id="markClose" class="btn" title="閉じる">✕</button>
+      <strong class="grow">しおり</strong>
+      <button id="markClose" class="btn" title="閉じる"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
     </div>
     <div class="srow">
       <input id="markMemo" type="text" placeholder="ひとこと（なくてもよい）" enterkeyhint="done" autocomplete="off">
@@ -129,13 +153,13 @@
 <!-- 聞く画面（BookPlayer の本：音声に合わせて、読んでいる文を明るくする） -->
 <section id="listen" class="view" hidden>
   <header class="bar lbar">
-    <button id="lsBack" class="btn">‹ 本棚</button>
+    <button id="lsBack" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg><span class="lbl">本棚</span></button>
     <div class="ltitles">
       <div id="lsTitle" class="ltitle"></div>
       <select id="lsTrack" aria-label="章"></select>
     </div>
-    <button id="lsFull" class="btn" title="本文だけを大きく">⛶</button>
-    <button id="lsMenuBtn" class="btn" title="設定">⚙</button>
+    <button id="lsFull" class="btn" title="本文だけを大きく"><svg class="ic" aria-hidden="true"><use href="#i-full"/></svg></button>
+    <button id="lsMenuBtn" class="btn" title="設定"><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg></button>
   </header>
   <div id="lsStage">
     <div id="lsPages"></div>
@@ -192,6 +216,9 @@
   </div>
   <audio id="lsAudio" preload="auto"></audio>
 </section>
+
+<!-- 本を取りこむ（本棚の右下の丸いボタン） -->
+<label id="addFab" class="fab" for="fileInput" title="本を取りこむ（ZIP・PDF）"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span>本を取りこむ</span></label>
 
 <div id="clock" class="clock" hidden></div>
 
