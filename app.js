@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v35';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v36';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -398,7 +398,7 @@ async function initDir() {
   try { h = await dbGet('meta', 'dir'); } catch (e) { }
   if (!h) return;
   DIR.handle = h;
-  $('pickDir').textContent = '📁 フォルダを変える';
+  $('pickLbl').textContent = 'フォルダを変える';
   let p = 'prompt';
   try { p = await h.queryPermission({ mode: 'read' }); } catch (e) { }
   if (p === 'granted') await scanDir();
@@ -409,7 +409,7 @@ $('pickDir').onclick = async () => {
   try { h = await window.showDirectoryPicker({ id: 'bookviewer', mode: 'read' }); } catch (e) { return; }  // 選ぶのをやめた
   DIR.handle = h;
   await dbPut('meta', 'dir', h);
-  $('pickDir').textContent = '📁 フォルダを変える';
+  $('pickLbl').textContent = 'フォルダを変える';
   await scanDir();
 };
 $('dirAllow').onclick = async () => {
@@ -533,7 +533,7 @@ function renderFolders(box, groups) {
   for (const g of groups) {
     const el = document.createElement('div'); el.className = 'book folder';
     const cv = document.createElement('div'); cv.className = 'cv';
-    const ic = document.createElement('div'); ic.className = 'ficon'; ic.textContent = '📁';
+    const ic = document.createElement('div'); ic.className = 'ficon'; ic.innerHTML = '<svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>';
     cv.append(ic);
     const ti = document.createElement('div'); ti.className = 't'; ti.textContent = g.name;
     const p = document.createElement('div'); p.className = 'p'; p.textContent = g.n + ' 冊';
@@ -595,6 +595,14 @@ function moveBook(it) {
   dlg.hidden = false;
 }
 $('moveClose').onclick = () => { $('moveDlg').hidden = true; };
+// ② 「編集」を押したときだけ、本ごとの「移す」「消す」を出す
+function setEdit(on) {
+  document.body.classList.toggle('editmode', on);
+  $('editBtn').classList.toggle('on', on);
+  $('editLbl').textContent = on ? '編集を終わる' : '編集';
+  $('editBtn').title = on ? '編集を終わる' : '本を移す・消すボタンを出す';
+}
+$('editBtn').onclick = () => setEdit(!document.body.classList.contains('editmode'));
 $('moveDlg').onclick = (e) => { if (e.target === $('moveDlg')) $('moveDlg').hidden = true; };
 
 // ---------------- 本棚の大きさ（ピンチ・ボタン・Ctrl＋ホイール）。0 は表紙なしの一覧 ----------------
@@ -606,7 +614,7 @@ function applyShelfSize(say) {
   const [w, name] = SHELF_SIZES[shelfSize];
   document.documentElement.style.setProperty('--card', (w || 140) + 'px');
   for (const id of ['books', 'vols']) $(id).classList.toggle('list', !w);
-  $('sizeBtn').textContent = '表示：' + name;
+  $('sizeLbl').textContent = name;
   saveJson('bv_shelfsize', shelfSize);
   if (say) toast('本棚：' + name);
 }
@@ -659,7 +667,7 @@ function renderCards(box, items) {
         return;
       }
       if (c && c.listen) {  // BookPlayer の本（聞きながら読む）
-        tag.textContent = '🎧 聞く';
+        tag.innerHTML = '<svg class="ic" aria-hidden="true"><use href="#i-head"/></svg>聞く';
         if (c.title) ti.textContent = c.title;
         pt.textContent = window.LISTEN ? LISTEN.progress(it, c.tracks) : '';
         fill.style.width = '0';
@@ -1279,7 +1287,7 @@ function curlProgress(s) {
   return Math.max(0, Math.min(1, (s.F.x - s.C.x) / (s.E.x - s.C.x || 1)));
 }
 
-function updateFlipBtn() { $('flipBtn').classList.toggle('on', FLIP.on); }
+function updateFlipBtn() { $('flipBtn').classList.toggle('on', FLIP.on); $('flipBtn').textContent = FLIP.on ? 'あり' : 'なし'; }
 $('flipBtn').onclick = () => {
   FLIP.on = !FLIP.on; saveJson('bv_flip', FLIP.on); updateFlipBtn();
   toast(FLIP.on ? 'めくる動きをつけます' : 'めくる動きをやめます');
@@ -1292,7 +1300,7 @@ let tone = loadJson('bv_tone', 'normal');
 function applyTone() {
   if (!TONES.some((t) => t[0] === tone)) tone = 'normal';
   document.body.dataset.tone = tone;
-  $('toneBtn').textContent = '色：' + TONES.find((t) => t[0] === tone)[1];
+  $('toneBtn').textContent = TONES.find((t) => t[0] === tone)[1];
   $('toneBtn').classList.toggle('on', tone !== 'normal');
 }
 $('toneBtn').onclick = () => {
@@ -1349,8 +1357,10 @@ function turn(side) {
 function updateBars() {
   const o = R.opt, n = R.src.count;
   $('dirBtn').textContent = o.dir === 'rtl' ? '右開き' : '左開き';
-  $('spreadBtn').textContent = { auto: '見開き：自動', single: '1ページ', double: '見開き' }[o.spread];
+  $('spreadBtn').textContent = { auto: '自動', single: '1ページ', double: '見開き' }[o.spread];
   $('shiftBtn').classList.toggle('on', !!o.shift);
+  $('shiftBtn').textContent = o.shift ? '1ページずらす' : 'ずらさない';
+  $('cropBtn').textContent = o.crop ? '切る' : '切らない';
   $('shiftBtn').disabled = !isSpread();
   $('cropBtn').classList.toggle('on', !!o.crop);
   pagesEl.classList.toggle('rtl', o.dir === 'rtl');
@@ -1360,7 +1370,7 @@ function updateBars() {
 }
 const pageLabel = (v) => (v.length > 1 ? (v[0] + 1) + '-' + (v[v.length - 1] + 1) : String(v[0] + 1));
 function saveOpt() { saveJson('bv_view_' + R.item.id, R.opt); }
-function setUi(on) { reader.classList.toggle('hideui', !on); }
+function setUi(on) { reader.classList.toggle('hideui', !on); if (!on) closeView(); }
 function toggleUi() { setUi(reader.classList.contains('hideui')); }
 
 let toastTimer = 0;
@@ -1410,7 +1420,7 @@ async function openBook(item, noPush) {
 function closeReader() {
   if (!R.open) return;
   R.open = false; R.back = null;
-  closeSearch(); closeMarks(); updateChip();
+  closeSearch(); closeMarks(); closeView(); updateChip();
   releaseBook();
   pagesEl.replaceChildren();
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
@@ -1434,6 +1444,12 @@ $('topBar').addEventListener('click', (e) => {
   if (e.target === $('title') || !$('title').classList.contains('open') || e.target.closest('button, input, select')) return;
   $('title').classList.remove('open');
 });
+
+// ① 読み方の設定（たまに使うボタンをまとめた所）
+function openView() { closeSearch(); closeMarks(); $('viewPanel').hidden = false; $('viewBtn').classList.add('on'); }
+function closeView() { $('viewPanel').hidden = true; $('viewBtn').classList.remove('on'); }
+$('viewBtn').onclick = () => ($('viewPanel').hidden ? openView() : closeView());
+$('viewClose').onclick = closeView;
 
 $('dirBtn').onclick = () => { R.opt.dir = R.opt.dir === 'rtl' ? 'ltr' : 'rtl'; saveOpt(); updateBars(); };
 $('spreadBtn').onclick = () => {
@@ -1518,7 +1534,7 @@ async function drawMarks(pg, vp, ctx, q) {
 
 const SR = { tok: 0, hits: [], q: '' };
 function openSearch() {
-  closeMarks();
+  closeMarks(); closeView();
   $('searchPanel').hidden = false;
   setTimeout(() => $('searchInput').focus(), 50);
 }
@@ -1646,7 +1662,7 @@ function updateMarkBtn() {
   $('markBtn').classList.toggle('on', on);
 }
 function openMarks() {
-  closeSearch();
+  closeSearch(); closeView();
   $('markPanel').hidden = false;
   $('markMemo').value = '';
   renderMarks();
@@ -1739,6 +1755,8 @@ function pinchInfo() {
 }
 stage.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
+  // 読み方の設定を出しているときは、ページを押すと閉じるだけ（ページはめくらない）
+  if (!$('viewPanel').hidden) { closeView(); gest = null; ptrs.clear(); return; }
   try { stage.setPointerCapture(e.pointerId); } catch (er) { }
   ptrs.set(e.pointerId, rel(e));
   if (ptrs.size === 1) {
@@ -1842,6 +1860,7 @@ document.addEventListener('keydown', (e) => {
   if (!R.open || !R.src || e.altKey || e.metaKey) return;
   if (!$('searchPanel').hidden) { if (e.key === 'Escape') { closeSearch(); e.preventDefault(); } return; }
   if (!$('markPanel').hidden) { if (e.key === 'Escape') { closeMarks(); e.preventDefault(); } return; }
+  if (!$('viewPanel').hidden && e.key === 'Escape') { closeView(); e.preventDefault(); return; }
   if (e.key === 'b' && !e.ctrlKey) { e.preventDefault(); openMarks(); return; }
   if (R.item.kind === 'pdf' && ((e.ctrlKey && e.key === 'f') || e.key === '/')) { e.preventDefault(); openSearch(); return; }
   const k = e.key;

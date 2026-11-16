@@ -230,3 +230,58 @@ body[data-tone="night"] #pages, body[data-tone="night"] canvas.curl { filter: in
 .books.list .book.done .cv::after { display: none; }
 .books.list .book .p { justify-content: flex-start; }
 .books.list .book .pbtns { margin-left: auto; }
+
+/* ===== v36：画面デザインの見直し ===== */
+/* ⑥ ボタンの絵は線の絵にそろえる */
+.ic { width: 18px; height: 18px; display: inline-block; vertical-align: -3px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.btn .ic + span { margin-left: 6px; }
+.btn:has(> .ic:only-child) { padding-left: 10px; padding-right: 10px; }
+.book .tag .ic { width: 12px; height: 12px; vertical-align: -2px; margin-right: 3px; }
+.book.folder .ficon .ic { width: 56px; height: 56px; stroke-width: 1.5; color: #cbd5e1; }
+.books.list .book.folder .ficon .ic { width: 22px; height: 22px; }
+/* ③ 「オン」は青く塗らず、青いふち＋✓。押せないボタンは薄く */
+.btn.on { background: rgba(59,130,246,.16); border-color: #60a5fa; color: #bfdbfe; }
+.btn.on:hover { background: rgba(59,130,246,.28); }
+.vpanel .btn.on::before { content: '✓ '; font-weight: bold; }
+.btn:disabled { opacity: .35; cursor: default; }
+.btn:disabled:hover { background: #374151; }
+.btn:disabled.on { background: #374151; border-color: var(--line); color: var(--text); }
+.btn:disabled.on::before { content: '' !important; }
+/* ⑤ 小さい字を読みやすく */
+.small { color: #c3cad5; font-size: 14px; }
+.book .p { color: #b6bfcc; font-size: 13px; }
+.small2 { color: #b6bfcc; }
+/* ② 移す・消すは「編集」を押したときだけ */
+body:not(.editmode) #library .pbtns { display: none; }
+body.editmode #library .book:not(.folder) .cv { outline: 2px dashed #64748b; outline-offset: 2px; }
+/* ④ 本棚の上は1段。本を取りこむは右下の丸いボタン */
+#library > .bar { flex-wrap: nowrap; }
+#library > .bar h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fab { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, calc(env(safe-area-inset-bottom) + 8px)); z-index: 20;
+  height: 56px; min-width: 56px; padding: 0 22px 0 18px; border-radius: 28px; background: var(--accent); color: #fff; display: flex; align-items: center;
+  justify-content: center; gap: 8px; font-size: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.45); cursor: pointer; }
+.fab:hover { background: #2563eb; }
+.fab .ic { width: 24px; height: 24px; }
+#library[hidden] ~ .fab { display: none; }
+#library { padding-bottom: 88px; }
+/* ① 読む画面の上は1段。たまに使うボタンは「表示」の中 */
+#topBar { flex-wrap: nowrap; }
+.title { -webkit-line-clamp: 1; }
+.title.open { flex-basis: auto; display: -webkit-box; -webkit-line-clamp: 4; }
+.vpanel { position: absolute; z-index: 30; right: 12px; top: calc(62px + max(0px, env(safe-area-inset-top) + var(--topx) - 10px)); width: 360px;
+  max-height: calc(100% - 90px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 10px 16px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.vhead { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; }
+.vhead strong { font-size: 16px; }
+.vrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15px; }
+.vrow small { color: var(--sub); font-size: 12px; margin-left: 4px; }
+.vrow .btn { min-width: 130px; }
+/* スマホ：字のボタンは絵だけにして、設定は下からせり出す */
+@media (max-width: 600px) {
+  #library > .bar .lbl, #topBar .lbl, #listen .lbar .lbl { display: none; }
+  .fab span { display: none; }
+  .fab { padding: 0; }
+  .vpanel { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 80%; border-radius: 16px 16px 0 0; border-bottom: 0;
+    padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+}
