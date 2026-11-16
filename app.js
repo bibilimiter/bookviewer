@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v33';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v34';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -451,17 +451,34 @@ async function showLibrary() {
   local.forEach((b) => { b.title = b.title.replace(/\.book$/i, ''); });
   const items = [...DIR.items, ...local];
   const t = (it) => Math.max(loadJson('bv_pos_' + it.id, {}).t || 0, loadJson('bv_listen_' + it.id, {}).t || 0);  // 🎧 の本は聞いた時刻
-  items.sort((a, b) => (t(b) - t(a)) || collator.compare((a.folder || '') + a.title, (b.folder || '') + b.title));
+  const byName = (a, b) => collator.compare((a.folder || '') + a.title, (b.folder || '') + b.title);
+  const sort = LIB.sort;
+  items.sort(sort === 'name' ? byName
+    : sort === 'added' ? (a, b) => ((b.added || 0) - (a.added || 0)) || byName(a, b)
+    : sort === 'size' ? (a, b) => ((b.size || 0) - (a.size || 0)) || byName(a, b)
+    : (a, b) => (t(b) - t(a)) || byName(a, b));
+  $('libTools').hidden = !items.length;
   const box = $('books'); box.innerHTML = '';
   // フォルダ（1段だけ）：トップではフォルダと、どこにも入っていない本を、フォルダの中ではその本だけを出す
   const groups = new Map();
-  for (const f of shelfFolders()) groups.set(f, { name: f, app: true, n: 0, first: null });
+  for (const f of shelfFolders()) groups.set(f, { name: f, app: true, n: 0, first: null, size: 0 });
   for (const it of items) {
     const f = folderOf(it); if (!f) continue;
-    if (!groups.has(f)) groups.set(f, { name: f, app: false, n: 0, first: null });
-    const g = groups.get(f); g.n++; if (!g.first) g.first = it;
+    if (!groups.has(f)) groups.set(f, { name: f, app: false, n: 0, first: null, size: 0 });
+    const g = groups.get(f); g.n++; g.size += it.size || 0; if (!g.first) g.first = it;
   }
   if (LIB.folder != null && !groups.has(LIB.folder)) LIB.folder = null;
+  // 題名で探しているときは、フォルダに関係なく、合う本だけを出す
+  const q = normTitle(LIB.q);
+  if (q) {
+    $('folderBar').hidden = true;
+    const hit = items.filter((it) => normTitle(it.title + ' ' + (it.folder || '') + ' ' + (folderOf(it) || '')).includes(q));
+    if (!hit.length) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = '「' + LIB.q + '」に合う本はありません'; box.append(p); }
+    renderCards(box, hit);
+    $('libHint').hidden = true;
+    showRoom();
+    return;
+  }
   $('folderBar').hidden = LIB.folder == null;
   if (LIB.folder != null) {
     const g = groups.get(LIB.folder);
@@ -479,6 +496,9 @@ async function showLibrary() {
   } else if (!hint.dataset.busy) hint.hidden = true;
 
   renderCards(box, shown);
+  showRoom();
+}
+async function showRoom() {
   if (navigator.storage && navigator.storage.estimate) {
     try {
       const e = await navigator.storage.estimate();
@@ -490,7 +510,17 @@ async function showLibrary() {
 // ---------------- 本棚のフォルダ（1段だけ） ----------------
 // 取りこんだ本：アプリの中で作ったフォルダ（bv_folders）に入れる（bv_shelf = { 本のid: フォルダ名 }）
 // Windows で選んだフォルダの本：PC の中のいちばん上のフォルダを、そのままフォルダとして見せる
-const LIB = { folder: null };
+const LIB = { folder: null, q: '', sort: loadJson('bv_sort', 'recent') };
+// 探すときは、全角・半角、大文字・小文字、ひらがな・カタカナのちがいを気にしない
+function normTitle(t) {
+  return String(t || '').normalize('NFKC').toLowerCase().replace(/[\u30a1-\u30f6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, ' ').trim();
+}
+{
+  let tm = 0;
+  $('libSearch').addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => { LIB.q = $('libSearch').value; showLibrary(); }, 250); });
+  $('libSort').value = LIB.sort;
+  $('libSort').addEventListener('change', () => { LIB.sort = $('libSort').value; saveJson('bv_sort', LIB.sort); showLibrary(); });
+}
 const shelfFolders = () => loadJson('bv_folders', []);
 const shelfMap = () => loadJson('bv_shelf', {});
 function folderOf(it) {
@@ -507,6 +537,7 @@ function renderFolders(box, groups) {
     cv.append(ic);
     const ti = document.createElement('div'); ti.className = 't'; ti.textContent = g.name;
     const p = document.createElement('div'); p.className = 'p'; p.textContent = g.n + ' 冊';
+    if (g.size) { const z = document.createElement('span'); z.className = 'sz'; z.textContent = mbText(g.size); p.append(z); }
     el.append(cv, ti, p);
     el.onclick = () => openFolder(g.name);
     box.append(el);
@@ -604,6 +635,79 @@ for (const id of ['library', 'setView']) {
 }
 applyShelfSize(false);
 
+function mbText(b) { const m = b / 1048576; if (m < 0.1) return '0.1 MB 未満'; return m >= 1000 ? (Math.round(m / 102.4) / 10) + ' GB' : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + ' MB'; }
+
+// ---------------- 読んだ位置・しおりを、別の端末へ写す（ファイルに書き出す・読みこむ） ----------------
+// 本は「ファイルの名前」で見分ける（端末ごとに本の見分け方がちがうため）
+const SYNC_KINDS = ['pos', 'marks', 'listen', 'view'];
+function fileKeyOf(id) {
+  id = String(id);
+  if (id.startsWith('local:')) return id.slice(6).replace(/:\d+$/, '');
+  if (id.startsWith('dir:')) return id.slice(4).split('/').pop();
+  return id;
+}
+$('syncOut').onclick = async () => {
+  const recs = [];
+  for (const k of Object.keys(localStorage)) {
+    const m = /^bv_(pos|marks|listen|view)_(.+)$/.exec(k); if (!m) continue;
+    const i = m[2].indexOf('#'), id = i < 0 ? m[2] : m[2].slice(0, i), sub = i < 0 ? '' : m[2].slice(i + 1);
+    recs.push({ k: m[1], f: fileKeyOf(id), sub, v: loadJson(k, null) });
+  }
+  const shelf = shelfMap(), folders = [];
+  for (const id of Object.keys(shelf)) { recs.push({ k: 'shelf', f: fileKeyOf(id), sub: '', v: shelf[id] }); }
+  const data = { app: 'BookViewer', v: 1, t: Date.now(), folders: shelfFolders(), recs };
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+  const name = 'BookViewer_position_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+  // iPhone・iPad は「共有」から「ファイルに保存」や AirDrop で送る
+  if (typeof appleTouch !== 'undefined' && appleTouch && navigator.canShare) {
+    try {
+      const file = new File([blob], name, { type: 'application/json' });
+      if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  toast('書き出しました：' + name, 4000);
+};
+$('syncIn').addEventListener('change', async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
+  let data;
+  try { data = JSON.parse(await f.text()); if (!data || data.app !== 'BookViewer' || !Array.isArray(data.recs)) throw 0; }
+  catch (e) { alert('BookViewer で書き出したファイルではないようです'); return; }
+  let local = []; try { local = await dbAll('books'); } catch (e) { }
+  const byFile = new Map();
+  for (const it of [...DIR.items, ...local]) { const fk = fileKeyOf(it.id); if (!byFile.has(fk)) byFile.set(fk, []); byFile.get(fk).push(it.id); }
+  const hitBooks = new Set(), missBooks = new Set();
+  const folders = shelfFolders(), shelf = shelfMap();
+  for (const r of data.recs) {
+    const ids = byFile.get(r.f);
+    if (!ids) { missBooks.add(r.f); continue; }
+    hitBooks.add(r.f);
+    for (const id of ids) {
+      if (r.k === 'shelf') {
+        if (!shelf[id] && r.v && !id.startsWith('dir:')) { shelf[id] = r.v; if (!folders.includes(r.v)) folders.push(r.v); }
+        continue;
+      }
+      if (!SYNC_KINDS.includes(r.k)) continue;
+      const key = 'bv_' + r.k + '_' + id + (r.sub ? '#' + r.sub : ''), cur = loadJson(key, null);
+      let v = r.v;
+      if (r.k === 'pos' || r.k === 'listen') { if (cur && (cur.t || 0) >= (v && v.t || 0)) continue; }  // 新しいほうを残す
+      else if (r.k === 'marks') {  // しおりは、両方を合わせる
+        const all = [...(cur || [])];
+        for (const m of v || []) if (!all.some((x) => x.p === m.p)) all.push(m);
+        v = all.sort((a, b) => a.p - b.p);
+      } else if (cur) continue;  // 見せ方は、この端末のものを残す
+      saveJson(key, v);
+    }
+  }
+  saveJson('bv_folders', folders); saveJson('bv_shelf', shelf);
+  await showLibrary();
+  alert('読みこみました：' + hitBooks.size + ' 冊の読んだ位置・しおりを写しました' +
+    (missBooks.size ? '\n（この端末にない本 ' + missBooks.size + ' 冊の分は、写していません）' : ''));
+});
+
 // 本の札を並べる（本棚と、巻の一覧で使う）
 function renderCards(box, items) {
   for (const it of items) {
@@ -616,6 +720,7 @@ function renderCards(box, items) {
     const ti = document.createElement('div'); ti.className = 't'; ti.textContent = it.title;
     const p = document.createElement('div'); p.className = 'p';
     const pt = document.createElement('span'); p.append(pt);
+    if (it.size && !it.parent) { const z = document.createElement('span'); z.className = 'sz'; z.textContent = mbText(it.size); pt.after(z); }
     const setProg = (c) => {
       if (c && c.set) {  // 何巻かのまとめ
         tag.textContent = '全' + c.n + '巻';
@@ -633,6 +738,7 @@ function renderCards(box, items) {
       }
       if (c && c.single) tag.textContent = c.single === 'pdf' ? 'PDF' : '漫画';
       const g = progressOf(it, c ? c.n : 0); pt.textContent = g.text; fill.style.width = Math.round(g.ratio * 100) + '%';
+      el.classList.toggle('done', g.ratio >= 1);  // 読み終わった本には印
     };
     setProg(null);
     if (it.src === 'local' && !it.parent) {
@@ -1348,6 +1454,7 @@ async function openBook(item, noPush) {
   pagesEl.replaceChildren();
   $('loading').textContent = '読みこんでいます…'; $('loading').hidden = false;
   if (!noPush) history.pushState({ reader: 1 }, '');
+  keepAwake();
   if (item.parent && !item.single) saveJson('bv_pos_' + item.parent.id, { vol: item.entry, t: Date.now() });  // まとめの中で、どの巻を読んでいるか
   $('setView').hidden = true;
   const tok = ++R.token;
@@ -1880,6 +1987,23 @@ if ('serviceWorker' in navigator) {
     else location.reload();
   });
 }
+// ---------------- 読んでいる間は、画面を消さない ----------------
+const WAKE = { lock: null, busy: false };
+async function keepAwake() {
+  const want = document.visibilityState === 'visible' && (R.open || (window.LISTEN && LISTEN.isOpen()));
+  if (!('wakeLock' in navigator) || WAKE.busy) return;
+  WAKE.busy = true;
+  try {
+    if (want && !WAKE.lock) {
+      WAKE.lock = await navigator.wakeLock.request('screen');
+      WAKE.lock.addEventListener('release', () => { WAKE.lock = null; });
+    } else if (!want && WAKE.lock) { const l = WAKE.lock; WAKE.lock = null; await l.release(); }
+  } catch (e) { WAKE.lock = null; }
+  WAKE.busy = false;
+}
+setInterval(keepAwake, 3000);
+document.addEventListener('visibilitychange', keepAwake);
+
 function updateVer() { $('ver').textContent = 'BookViewer ' + APP_VERSION; removeKey('bv_diag'); }
 updateVer();
 checkDesktopMode();

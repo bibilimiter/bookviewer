@@ -214,3 +214,22 @@ body[data-tone="night"] #pages, body[data-tone="night"] canvas.curl { filter: in
 .books.list .book .t { -webkit-line-clamp: 1; font-size: 15px; grid-column: 2 / span 2; }
 .books.list .book .p { grid-column: 2 / span 2; }
 .books.list .book.folder .ficon { font-size: 22px; }
+
+/* 本棚：探す・並べかえ */
+.ltools { display: flex; gap: 8px; margin: 12px 16px 0; }
+.ltools[hidden] { display: none; }
+#libSearch { flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: #0b1220; color: var(--text); }
+#libSort { flex: none; }
+/* 本の大きさ（一覧のときだけ） */
+.book .sz { color: var(--sub); }
+.book .sz::before { content: '・'; }
+.books:not(.list) .sz { display: none; }
+/* 読み終わった本の印 */
+.book.done .t::before { content: '✓ '; color: #4ade80; font-weight: bold; }
+.book.done .cv::after { content: '読了'; position: absolute; right: 4px; bottom: 8px; background: #15803d; color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 4px; }
+.books.list .book.done .cv::after { display: none; }
+/* 読んだ位置を写す */
+.syncrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 16px 8px; }
+.syncrow .btn { font-size: 13px; padding: 6px 10px; }
+.books.list .book .p { justify-content: flex-start; }
+.books.list .book .pbtns { margin-left: auto; }
