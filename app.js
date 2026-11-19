@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v36';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v37';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -864,8 +864,9 @@ async function findWide(src) {
 
 // ---- 余白を切る ----
 // 小さく描いて、字や絵のある範囲（左・上・右・下を 0〜1 の割合で）を調べる。暗い地のページは null、白紙は {blank}
+// v37：小さすぎると細い字（短い行・ふりがな・柱）がうすくなって見落とし、切れていた → 400 にして、うすい字も拾い、まわりを多めに残す
 async function measureCrop(pg) {
-  const W = 200, sc = W / pg.w, H = Math.max(1, Math.round(pg.h * sc));
+  const W = 400, sc = W / pg.w, H = Math.max(1, Math.round(pg.h * sc));
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
@@ -879,13 +880,13 @@ async function measureCrop(pg) {
   let acc = 0, bg = 255;
   for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= L.length * 0.85) { bg = v; break; } }
   if (bg < 120) return null;
-  const thr = Math.min(170, bg - 50), ex = Math.max(1, Math.round(W * 0.01)), ey = Math.max(1, Math.round(H * 0.01));
+  const thr = Math.min(200, bg - 35), ex = Math.max(1, Math.round(W * 0.01)), ey = Math.max(1, Math.round(H * 0.01));
   const rows = new Uint16Array(H), cols = new Uint16Array(W);
   for (let y = ey; y < H - ey; y++) for (let x = ex; x < W - ex; x++) if (L[y * W + x] < thr) { rows[y]++; cols[x]++; }
   const first = (a) => a.findIndex((v) => v >= 2), last = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] >= 2) return i; return -1; };
   const y0 = first(rows), y1 = last(rows), x0 = first(cols), x1 = last(cols);
   if (y0 < 0 || x0 < 0) return { blank: true };
-  const pad = 0.015;
+  const pad = 0.025;
   return [Math.max(0, x0 / W - pad), Math.max(0, y0 / H - pad), Math.min(1, (x1 + 1) / W + pad), Math.min(1, (y1 + 1) / H + pad)];
 }
 const cropOn = () => R.opt.crop && Array.isArray(R.cropBase);
@@ -897,7 +898,7 @@ function ensureCrop(i, pg) {
 async function findCropBase() {
   if (R.cropBase !== undefined || R.cropBusy) return;
   const src = R.src, id = R.item.id, stamp = R.stamp;
-  const saved = loadJson('bv_crop_' + id, null);
+  const saved = loadJson('bv_crop2_' + id, null);
   if (saved && saved.stamp === stamp) { R.cropBase = saved.b; return; }
   R.cropBusy = true;
   try {
@@ -923,7 +924,7 @@ async function findCropBase() {
       if ((b[2] - b[0]) * (b[3] - b[1]) > 0.97) b = null;  // ほとんど余白がない
     }
     R.cropBase = b;
-    saveJson('bv_crop_' + id, { stamp, b });
+    saveJson('bv_crop2_' + id, { stamp, b });
     if (R.opt.crop) show(R.pos, false);
   } finally { R.cropBusy = false; }
 }
@@ -1411,7 +1412,7 @@ async function openBook(item, noPush) {
   }
   const pos = loadJson('bv_pos_' + item.id, null);
   const src = R.src;
-  if (R.opt.crop) { const sv = loadJson('bv_crop_' + item.id, null); if (sv && sv.stamp === R.stamp) R.cropBase = sv.b; }
+  if (R.opt.crop) { const sv = loadJson('bv_crop2_' + item.id, null); if (sv && sv.stamp === R.stamp) R.cropBase = sv.b; }
   await show(pos && pos.p < R.src.count ? pos.p : 0);
   if (R.src !== src) return;
   if (R.opt.crop) findCropBase();
