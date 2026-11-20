@@ -95,6 +95,11 @@ input, textarea { user-select: text; -webkit-user-select: text; -webkit-touch-ca
 .ht { word-break: break-all; }
 .ht mark { background: #f59e0b; color: #111; border-radius: 2px; padding: 0 1px; }
 
+/* 拡大中だけ出る「もとの大きさ」ボタン（右下） */
+.unzoom { position: absolute; right: 10px; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 14; border-radius: 999px;
+  padding: 6px 12px; font-size: 13px; background: rgba(17,24,39,.8); border: 1px solid rgba(255,255,255,.35); transition: bottom .2s; }
+#reader.hideui .unzoom { bottom: calc(14px + env(safe-area-inset-bottom)); }
+
 /* 検索中の札（画面の下） */
 .chip { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 15;
   display: flex; gap: 6px; align-items: center; background: rgba(17,24,39,.94); border: 1px solid #f59e0b; border-radius: 999px;
