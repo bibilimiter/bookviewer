@@ -1,7 +1,7 @@
 // BookViewer：漫画（JPEG の入った ZIP）と小説（PDF）を読む。Windows・Android・iPad のブラウザで動く（PWA）
 'use strict';
 
-const APP_VERSION = 'v37';  // 画面を直したら、sw.js の VERSION といっしょに上げる
+const APP_VERSION = 'v38';  // 画面を直したら、sw.js の VERSION といっしょに上げる
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // 日本語の文字の読み方の表（CMap）と標準の字の形。これがないと、日本語の PDF から文字を取り出せないことがある
@@ -1018,7 +1018,7 @@ async function show(s, keepZoom, flip) {
     const old = flip && FLIP.on && R.z === 1 && pagesEl.children.length ? snapStage() : null;
     pagesEl.replaceChildren(...pgs.map(boxOf));
     updateMarkBtn();
-    if (!keepZoom) resetZoom();
+    if (keepZoom === 'turn') zoomStartPos(L, flip >= 0); else if (!keepZoom) resetZoom();
     if (old) curlAuto(old, flip > 0);
   } catch (e) {
     if (tok === R.token) toast('読めませんでした：' + errText(e), 4000);
@@ -1323,7 +1323,7 @@ async function prepare(s, tok) {
 }
 let nextVolAsk = 0;
 function next() {
-  if (R.pos + R.view.length < R.src.count) { show(R.pos + R.view.length, false, 1); return; }
+  if (R.pos + R.view.length < R.src.count) { show(R.pos + R.view.length, keepZ(), 1); return; }
   const nv = nextVolume();
   if (!nv) { toast('最後のページです'); return; }
   // 最後のページで、もう一度めくると次の巻へ（うっかり進まないように）
@@ -1345,7 +1345,7 @@ function releaseBook() {
 }
 function switchVolume(v) { releaseBook(); openBook(v, true); }
 function prev() {
-  if (R.pos > 0) show(R.pos - 1, false, -1);
+  if (R.pos > 0) show(R.pos - 1, keepZ(), -1);
   else toast('最初のページです');
 }
 // 画面の左右どちら側を押したか（右開きの本は、左が「次」）
@@ -1700,6 +1700,8 @@ function renderMarks() {
     list.append(row);
   }
 }
+$('unzoom').onclick = (e) => { e.stopPropagation(); resetZoom(); };
+for (const ev of ['pointerdown', 'pointerup']) $('unzoom').addEventListener(ev, (e) => e.stopPropagation());
 $('markBtn').onclick = () => ($('markPanel').hidden ? openMarks() : closeMarks());
 $('markClose').onclick = closeMarks;
 $('markAdd').onclick = () => {
@@ -1718,13 +1720,28 @@ $('markMemo').addEventListener('keydown', (e) => {
 });
 
 // ---------------- 拡大と、指での操作 ----------------
-function applyZoom() { pagesEl.style.transform = 'translate(' + R.tx + 'px,' + R.ty + 'px) scale(' + R.z + ')'; }
+function applyZoom() {
+  pagesEl.style.transform = 'translate(' + R.tx + 'px,' + R.ty + 'px) scale(' + R.z + ')';
+  $('unzoom').hidden = !(R.z > 1);
+}
 function clampPan() {
   const W = stage.clientWidth, H = stage.clientHeight;
   R.tx = Math.min(0, Math.max(W - W * R.z, R.tx));
   R.ty = Math.min(0, Math.max(H - H * R.z, R.ty));
 }
 function resetZoom() { R.z = 1; R.tx = 0; R.ty = 0; applyZoom(); }
+// v38：拡大したままめくる。拡大中なら、次のページも同じ大きさで出す
+const keepZ = () => (R.z > 1.05 ? 'turn' : false);
+// めくった後の見る場所：次へ進んだら読みはじめ（右開きは右上、左開きは左上）、前へもどったら読み終わり（右開きは左下、左開きは右下）
+function zoomStartPos(L, forward) {
+  const W = stage.clientWidth, H = stage.clientHeight, z = R.z;
+  const cw = L.reduce((a, b) => a + b.w, 0), ch = Math.max(...L.map((b) => b.h));
+  const x0 = (W - cw) / 2, x1 = x0 + cw, y0 = (H - ch) / 2, y1 = y0 + ch;
+  const right = (R.opt.dir === 'rtl') === forward;  // 右はしを見せるか
+  R.tx = z * cw <= W ? W / 2 - z * (x0 + x1) / 2 : right ? W - z * x1 : -z * x0;
+  R.ty = z * ch <= H ? H / 2 - z * (y0 + y1) / 2 : forward ? -z * y0 : H - z * y1;
+  clampPan(); applyZoom();
+}
 // (cx, cy) の所を動かさずに、拡大率を z にする
 function zoomAt(z, cx, cy) {
   z = Math.max(1, Math.min(6, z));
@@ -1780,7 +1797,7 @@ stage.addEventListener('pointermove', (e) => {
   } else if (gest.type === 'one') {
     const p = rel(e), dx = p.x - gest.x0, dy = p.y - gest.y0;
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) gest.moved = true;
-    if (R.z > 1) { R.tx = gest.tx0 + dx; R.ty = gest.ty0 + dy; clampPan(); applyZoom(); return; }
+    if (R.z > 1) { R.tx = gest.tx0 + dx; R.ty = gest.ty0 + dy; clampPan(); applyZoom(); gest.zoomed = true; return; }
     // 横に動かしたら、指でつまんでめくる
     const now = performance.now();
     gest.vx = (p.x - (gest.lastX ?? gest.x0)) / Math.max(1, now - (gest.lastT || now - 16));
@@ -1823,6 +1840,8 @@ function endPointer(e, cancelled) {
   if (cancelled) return;
   if (!g.moved && dt < 500) { onTap(p.x, p.y); return; }
   if (R.z === 1 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.2) turn(dx > 0 ? 'left' : 'right');
+  // 拡大中：ページのはしまで来ていて、さらに同じ向きにはらったら、拡大したままめくる
+  else if (g.zoomed && R.z > 1 && Math.abs(R.tx - g.tx0) < 2 && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) turn(dx > 0 ? 'left' : 'right');
 }
 stage.addEventListener('pointerup', (e) => endPointer(e, false));
 stage.addEventListener('pointercancel', (e) => endPointer(e, true));
@@ -1832,7 +1851,6 @@ function onTap(x, y) {
   // 2回すばやく押しての拡大はしない（表示が乱れることがあるため）。拡大は指2本で広げる
   const W = stage.clientWidth;
   const zone = x < W * 0.3 ? 'left' : x > W * 0.7 ? 'right' : 'center';
-  if (R.z > 1 && zone !== 'center') { resetZoom(); return; }  // 拡大中：はしを押すともとの大きさにもどる
   if (zone !== 'center') { lastTap = null; turn(zone); return; }
   // まん中：1回で上下のボタンを出す／しまう。2回すばやく押すと画面いっぱいの切りかえ（できる端末だけ）
   if (!canFull) { toggleUi(); return; }
